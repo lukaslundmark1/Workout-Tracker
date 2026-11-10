@@ -307,6 +307,7 @@
   /* Swiping */
   #app { overflow-x: clip; }
   .swipe-area { min-height: calc(100vh - 56px - env(safe-area-inset-top)); }
+  .swipe-area.day-swipe { min-height: calc(100vh - 190px - env(safe-area-inset-top)); touch-action: pan-y; }
   .pager, .week-track { position: relative; will-change: transform; }
   .peek { position: absolute; width: 100%; pointer-events: none; }
   .slide-wrap, .peek { display: flow-root; }
@@ -902,26 +903,45 @@ function renderDay() {
     return `<button class="${cls}" data-k="${k}"><span class="wd">${wd()[i]}</span><span class="num">${parse(k).getDate()}</span><span class="dot ${dotCls(k, logged)}"></span></button>`;
   }).join('')}</div>`;
 
-  const day = dayOf(state.selected);
-  const pd = planDayFor(state.selected);
+  // Everything below the week strip, for any day (also drawn for the neighbouring days while you swipe)
+  const dayBodyHTML = k => {
+    const day = dayOf(k);
+    const pd = planDayFor(k);
+    const st = data.days[k];
+    const untouched = !logged.has(k) && !day.session;
+    const canRest = pd && pd.workout && k >= tk && untouched && !(st && !st.plan && st.items.length) && !(st && st.pinned);
+    const canUnrest = k >= tk && st && st.rest && !st.items.length && !logged.has(k);
+    const canUnpin = k >= tk && st && st.pinned && untouched;
+    const nx = k === tk && todayIsFree() && pd && !pd.workout && !pd.extra ? upNext() : null;   // rest day today: offer the next workout
+    const rows = day.items.map(it => {
+      const ex = exById(it.exId); if (!ex) return '';
+      const s = setsFor(it.exId, k);
+      const total = Math.max(it.sets || 0, s.length);
+      const sub = s.length ? s.map(x => `${W(x.weight)}×${x.reps}`).join(', ') : `${plural(total, 'set')} planned`;
+      const confirm = k === state.selected && state.pending === 'trash:' + it.exId;
+      return `<div class="cell-wrap drag-row" data-row="${it.exId}">
+        <button class="grip" aria-label="Drag to reorder ${esc(ex.name)}">${ICON_GRIP}</button>
+        <button class="cell" data-ex="${it.exId}" style="padding-left:4px"><span class="main"><div>${esc(ex.name)}</div><div class="sub">${s.length ? `${s.length}/${total} · ` : ''}${sub}</div></span></button>
+        <button class="trash ${confirm ? 'confirm' : ''}" data-trash="${it.exId}" aria-label="Remove ${esc(ex.name)}">${confirm ? 'Delete' : ICON_TRASH}</button>
+      </div>`;
+    }).join('');
+    return `
+    <div class="day-title">${fmtLong(k)}</div>
+    <div class="day-sub">${day.items.length && day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : day.items.length ? 'Custom workout'
+      : pd && pd.extra ? 'Rest day (moved)' : pd ? 'Rest day' : k < tk ? 'Nothing logged' : 'No workout planned'}${day.items.length && k < tk && !logged.has(k) && !day.session ? ' · not trained' : ''}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ''}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
+    ${isFinished(k) && data.sets.some(x => x.date === k) ? `<button class="capsule glass move-btn" id="sumBtn">${svg('<path d="M5 19V11M12 19V5M19 19v-6"/>', 16, 2.4)} Workout summary</button>` : ''}
+    ${nx ? `<button class="capsule glass move-btn" id="pullNext">${svg('<path d="M7 5l11 7-11 7z"/>', 15, 2.2)} Do ${esc(nx.workout.name)} today</button>` : ''}
+    ${canDoToday(k) ? `<button class="capsule glass move-btn" id="doToday">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16, 2.4)} Do it today</button>` : ''}
+    ${canRest ? `<button class="capsule glass move-btn" id="restDay">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 15, 2.2)} ${k === tk ? "Can't make it today" : 'Move back a day'}</button>` : ''}
+    ${canUnrest ? `<button class="capsule glass move-btn" id="unrestDay">${svg('<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5"/>', 15, 2.2)} Undo move</button>` : ''}
+    ${canUnpin ? `<button class="capsule glass move-btn" id="unpinDay">${svg('<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5"/>', 15, 2.2)} Undo</button>` : ''}
+    ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
+    ${day.items.length && canFinish(k) ? `<button class="primary" id="finishDay">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
+    <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
+  };
   const k = state.selected, st = data.days[k];
+  const day = dayOf(k), pd = planDayFor(k);
   const untouched = !logged.has(k) && !day.session;
-  const canRest = pd && pd.workout && k >= tk && untouched && !(st && !st.plan && st.items.length) && !(st && st.pinned);
-  const canUnrest = k >= tk && st && st.rest && !st.items.length && !logged.has(k);
-  const canUnpin = k >= tk && st && st.pinned && untouched;
-  const nx = k === tk && todayIsFree() && pd && !pd.workout && !pd.extra ? upNext() : null;   // rest day today: offer the next workout
-  const rows = day.items.map(it => {
-    const ex = exById(it.exId); if (!ex) return '';
-    const s = setsFor(it.exId, state.selected);
-    const total = Math.max(it.sets || 0, s.length);
-    const sub = s.length ? s.map(x => `${W(x.weight)}×${x.reps}`).join(', ') : `${plural(total, 'set')} planned`;
-    const confirm = state.pending === 'trash:' + it.exId;
-    return `<div class="cell-wrap drag-row" data-row="${it.exId}">
-      <button class="grip" aria-label="Drag to reorder ${esc(ex.name)}">${ICON_GRIP}</button>
-      <button class="cell" data-ex="${it.exId}" style="padding-left:4px"><span class="main"><div>${esc(ex.name)}</div><div class="sub">${s.length ? `${s.length}/${total} · ` : ''}${sub}</div></span></button>
-      <button class="trash ${confirm ? 'confirm' : ''}" data-trash="${it.exId}" aria-label="Remove ${esc(ex.name)}">${confirm ? 'Delete' : ICON_TRASH}</button>
-    </div>`;
-  }).join('');
 
   app.innerHTML = `
     <header class="weekhead">
@@ -932,26 +952,17 @@ function renderDay() {
       <button class="circle glass" id="calBtn" aria-label="Calendar">${ICON_CAL}</button>
     </header>
     <div class="week-wrap" id="weekWrap"><div class="week-track" id="weekTrack">${weekHTML(state.weekStart)}</div></div>
-    <div class="day-title">${fmtLong(state.selected)}</div>
-    <div class="day-sub">${day.items.length && day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : day.items.length ? 'Custom workout'
-      : pd && pd.extra ? 'Rest day (moved)' : pd ? 'Rest day' : state.selected < tk ? 'Nothing logged' : 'No workout planned'}${day.items.length && state.selected < tk && !logged.has(state.selected) && !day.session ? ' · not trained' : ''}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ''}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
-    ${isFinished(state.selected) && data.sets.some(x => x.date === state.selected) ? `<button class="capsule glass move-btn" id="sumBtn">${svg('<path d="M5 19V11M12 19V5M19 19v-6"/>', 16, 2.4)} Workout summary</button>` : ''}
-    ${nx ? `<button class="capsule glass move-btn" id="pullNext">${svg('<path d="M7 5l11 7-11 7z"/>', 15, 2.2)} Do ${esc(nx.workout.name)} today</button>` : ''}
-    ${canDoToday(k) ? `<button class="capsule glass move-btn" id="doToday">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16, 2.4)} Do it today</button>` : ''}
-    ${canRest ? `<button class="capsule glass move-btn" id="restDay">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 15, 2.2)} ${k === tk ? "Can't make it today" : 'Move back a day'}</button>` : ''}
-    ${canUnrest ? `<button class="capsule glass move-btn" id="unrestDay">${svg('<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5"/>', 15, 2.2)} Undo move</button>` : ''}
-    ${canUnpin ? `<button class="capsule glass move-btn" id="unpinDay">${svg('<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5"/>', 15, 2.2)} Undo</button>` : ''}
-    ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
-    ${day.items.length && canFinish(state.selected) ? `<button class="primary" id="finishDay">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
-    <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
+    <div class="swipe-area day-swipe" id="daySwipe"><div class="pager" id="dayPager"><div class="slide-wrap ${state.daySlide ? 'from-' + state.daySlide : ''}">${dayBodyHTML(k)}</div></div></div>`;
+  state.daySlide = null;
 
   const shift = n => { state.weekStart = addDays(state.weekStart, 7 * n); render(); };
   $('prevW').onclick = () => shift(-1);
   $('nextW').onclick = () => shift(1);
-  if ($('today')) $('today').onclick = () => { state.selected = tk; state.weekStart = startOfWeek(new Date()); render(); };
+  const pickDay = k2 => { if (k2 === state.selected) return; state.daySlide = k2 > state.selected ? 'right' : 'left'; state.selected = k2; state.pending = null; render(); };
+  if ($('today')) $('today').onclick = () => { state.weekStart = startOfWeek(new Date()); if (tk !== state.selected) pickDay(tk); else render(); };
   $('calBtn').onclick = () => { const d = parse(state.selected); go('calendar', { calMonth: new Date(d.getFullYear(), d.getMonth(), 1) }); };
   $('addEx').onclick = () => go('picker', { pickerQuery: '', pickerMode: data.workouts.length ? 'workouts' : 'exercises' });
-  app.querySelectorAll('.day').forEach(b => b.onclick = () => { state.selected = b.dataset.k; render(); });
+  app.querySelectorAll('.day').forEach(b => b.onclick = () => pickDay(b.dataset.k));
   app.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => go('log', { logExId: b.dataset.ex }));
   if ($('finishDay')) $('finishDay').onclick = () => openFinish(state.selected);
   if ($('restDay')) $('restDay').onclick = () => openSheet({ type: 'moveBack', k });
@@ -978,6 +989,11 @@ function renderDay() {
     save(); render();
   });
 
+  // Swipe the day itself left/right to go to the next/previous day (the week strip follows)
+  swipePager($('daySwipe'), $('dayPager'), {
+    peek: dir => dayBodyHTML(dk(addDays(parse(k), dir))),
+    commit: dir => { const k2 = dk(addDays(parse(k), dir)); state.selected = k2; state.weekStart = startOfWeek(parse(k2)); state.pending = null; render(); },
+  });
   swipePager($('weekWrap'), $('weekTrack'), {
     peek: dir => weekHTML(addDays(state.weekStart, 7 * dir)),
     commit: dir => shift(dir),
@@ -2343,7 +2359,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.20.1';
+const APP_VERSION = '0.21';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
