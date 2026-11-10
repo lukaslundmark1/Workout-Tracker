@@ -556,7 +556,7 @@ function render() {
   const VIEWS = { day: renderDay, log: renderLog, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
                   wList: renderWorkoutList, wEdit: renderWorkoutEdit, pView: renderPlanView, pEdit: renderPlanEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
                   friends: renderFriends, friend: renderFriend, me: renderMe, pWorkouts: renderProfWorkouts, pWorkout: renderProfWorkout,
-                  pExercises: renderProfExercises, fEx: renderFriendExercise, settings: renderSettings };
+                  fEx: renderFriendExercise, settings: renderSettings };
   clearInterval(timerTick);
   app.ontouchstart = app.ontouchend = null;
   VIEWS[state.views[state.tab]]();
@@ -564,7 +564,7 @@ function render() {
   renderDock();
   renderSheet();
 }
-const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pExercises: 2, pWorkout: 3, fEx: 4 };
+const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pWorkout: 3, fEx: 4 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
 function ghost(onTop) {
@@ -1889,7 +1889,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.16';
+const APP_VERSION = '0.16.1';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2222,13 +2222,13 @@ function renderFriend() {
 }
 
 /* ================= Profiles (yours and friends') =================
-   Same layout for both: stats, the last 3 workouts, the 5 most recently trained exercises.
-   "See all" opens the full lists; a workout opens its sets; an exercise opens its graph + history. */
+   Same layout for both: stats and the last 3 workouts.
+   "See all" opens every workout; a workout opens its sets; an exercise in it opens its graph + history. */
 const myLabel = () => (data.settings.name || '').trim() || (cloud.user && (cloud.user.displayName || (cloud.user.email || '').split('@')[0])) || 'You';
 const profRoot = () => state.prof === 'me' ? 'me' : 'friend';
 // Where "back" (or pulling down) goes from a profile screen
 function backOf(v) {
-  if (v === 'pWorkouts' || v === 'pExercises') return profRoot();
+  if (v === 'pWorkouts') return profRoot();
   if (v === 'pWorkout') return state.pwBack || profRoot();
   if (v === 'fEx') return state.fExBack || profRoot();
   return PULL_BACK[v];
@@ -2262,17 +2262,6 @@ function workoutRowHTML(c, k) {
   if (d && d.session) bits.push(d.session.end ? fmtMins(d.session.end - d.session.start) : '<span style="color:var(--green)">in progress</span>');
   return cell({ attrs: `data-pw="${k}"`, main: workoutTitle(c, k), sub: bits.join(' · ') });
 }
-// Exercises ordered by when they were last trained, with the best set (highest estimated 1RM) from that day
-function recentExercises(c) {
-  const last = {};
-  for (const s of c.sets) if (!last[s.exId] || s.date > last[s.exId]) last[s.exId] = s.date;
-  return c.exercises.filter(e => last[e.id]).map(e => {
-    const day = last[e.id];
-    const best = c.sets.filter(s => s.exId === e.id && s.date === day).reduce((a, b) => (e1rm(b) > e1rm(a) ? b : a));
-    return { ex: e, day, best };
-  }).sort((a, b) => (a.day === b.day ? a.ex.name.localeCompare(b.ex.name) : a.day < b.day ? 1 : -1));
-}
-const exRowHTML = r => cell({ attrs: `data-pe="${r.ex.id}"`, main: esc(r.ex.name), sub: relDay(r.day), detail: setTxt(r.best) });
 function lastTrainedLabel(k) {
   if (!k) return '–';
   const n = daysBetween(k, todayKey());
@@ -2280,7 +2269,6 @@ function lastTrainedLabel(k) {
 }
 function profileBodyHTML(c, isFriend) {
   const dates = profDates(c), since30 = dk(addDays(new Date(), -30)), wk = dk(startOfWeek(new Date()));
-  const exs = recentExercises(c);
   return `
     <div class="stat-row three">
       <div class="stat"><div class="stat-n">${dates.filter(d => d >= since30).length}</div><div class="stat-l">in 30 days</div></div>
@@ -2290,15 +2278,12 @@ function profileBodyHTML(c, isFriend) {
     <div class="section sec-link"><span>Recent workouts</span>${dates.length > 3 ? '<button id="seeW">See all</button>' : ''}</div>
     ${dates.length ? `<div class="group">${dates.slice(0, 3).map(k => workoutRowHTML(c, k)).join('')}</div>`
       : `<div class="group"><div class="empty">${isFriend ? 'No workouts in the last 4 months.' : 'No workouts logged yet.'}</div></div>`}
-    ${exs.length ? `<div class="section sec-link"><span>Exercises</span>${exs.length > 5 ? `<button id="seeE">See all ${exs.length}</button>` : ''}</div>
-      <div class="group">${exs.slice(0, 5).map(exRowHTML).join('')}</div>
-      <div class="footnote">Most recently trained, with the best set from that day.</div>` : ''}`;
+`;
 }
 // Taps inside a profile body, a workout page or the full lists
 function wireProfileBody(from) {
   const here = state.views[state.tab];
   if ($('seeW')) $('seeW').onclick = () => go('pWorkouts');
-  if ($('seeE')) $('seeE').onclick = () => go('pExercises');
   app.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => go('pWorkout', { pwDate: b.dataset.pw, pwBack: here }));
   app.querySelectorAll('[data-pe]').forEach(b => b.onclick = () => go('fEx', { friendEx: b.dataset.pe, fExBack: here, stat: 'e1rm' }));
 }
@@ -2349,22 +2334,6 @@ function renderProfWorkout() {
   $('back').onclick = () => go(backOf('pWorkout'));
   wireProfileBody();
 }
-function renderProfExercises() {
-  const c = profSrc(); if (!c) return go(profRoot());
-  const all = recentExercises(c);
-  app.innerHTML = profHeader('Exercises') + searchHTML('pq', 'Search exercises') + '<div id="pRes"></div>'
-    + '<div class="footnote">Most recently trained first, with the best set from that day.</div>';
-  const draw = () => {
-    const q = $('pq').value.trim().toLowerCase();
-    const list = all.filter(r => r.ex.name.toLowerCase().includes(q));
-    $('pRes').innerHTML = list.length ? `<div class="group">${list.map(exRowHTML).join('')}</div>` : '<div class="group"><div class="empty">No matches.</div></div>';
-    wireProfileBody();
-  };
-  $('pq').oninput = draw;
-  draw();
-  $('back').onclick = () => go(backOf('pExercises'));
-}
-
 // A friend's exercise: same graph and history as your own, read-only
 function renderFriendExercise() {
   if (state.prof === 'me') {
@@ -2456,7 +2425,7 @@ function sheetAcceptFriend(el) {
 // Pull a slid-up screen (or a sheet) down from the top to close it. It follows your finger,
 // the screen underneath grows back into place, and letting go early springs it back.
 const PULL_BACK = { log: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList', friend: 'friends', me: 'friends',
-                    pWorkouts: 1, pExercises: 1, pWorkout: 1, fEx: 1 };   // 1 = depends on where you came from (backOf)
+                    pWorkouts: 1, pWorkout: 1, fEx: 1 };   // 1 = depends on where you came from (backOf)
 (function pullToClose() {
   let p = null;
   const ease = '.32s cubic-bezier(.2,.85,.3,1)';
