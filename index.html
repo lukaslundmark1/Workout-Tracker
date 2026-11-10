@@ -360,6 +360,29 @@
   .date-input { border: 0; background: var(--fill); border-radius: 10px; padding: 7px 10px; font-size: 16px; color: var(--label); font-family: inherit; }
   .primary:disabled { opacity: .45; }
 
+  /* Friends */
+  .code-card { padding: 16px 18px; text-align: center; }
+  .code { font-family: var(--rounded); font-size: 34px; font-weight: 700; letter-spacing: .08em; margin: 4px 0 12px; font-variant-numeric: tabular-nums; }
+  .code-btns { display: flex; gap: 10px; justify-content: center; }
+  .code-btns .capsule { height: 40px; font-size: 15px; color: var(--tint); }
+  .code-btns .capsule:disabled { opacity: .4; }
+  .code-input { font-family: var(--rounded); font-size: 26px; font-weight: 700; letter-spacing: .1em; text-align: center; text-transform: uppercase; }
+  .avatar.sm { width: 36px; height: 36px; font-size: 15px; margin-right: 12px; }
+  .cell .avatar.sm { margin-right: 0; }
+  .tint-fill { height: 34px; padding: 0 14px; font-size: 15px; background: var(--tint); color: #fff; }
+  .friend-head { display: flex; align-items: center; gap: 14px; margin: 4px 0 16px; }
+  .stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat { background: var(--card); border-radius: var(--r); padding: 14px 16px; }
+  .stat-n { font-family: var(--rounded); font-size: 30px; font-weight: 700; }
+  .stat-l { font-size: 13px; color: var(--label2); }
+  .hset .fx { flex: 0 0 44%; color: var(--label2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+  .tab-badge { position: absolute; top: 4px; left: 50%; margin-left: 6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; }
+  #dock button { position: relative; }
+  .switch { -webkit-appearance: none; appearance: none; width: 51px; height: 31px; border-radius: 16px; background: var(--fill2); position: relative; flex: none; transition: background .2s; cursor: pointer; margin: 0; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2); transition: transform .2s cubic-bezier(.3,1.3,.6,1); }
+  .switch:checked { background: var(--green); }
+  .switch:checked::after { transform: translateX(20px); }
+
   /* Floating tab bar */
   #dock {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 10;
@@ -521,7 +544,7 @@ const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList', friends:
 function render() {
   const VIEWS = { day: renderDay, log: renderLog, finish: renderFinish, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
                   wList: renderWorkoutList, wEdit: renderWorkoutEdit, pView: renderPlanView, pEdit: renderPlanEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
-                  friends: renderFriends, settings: renderSettings };
+                  friends: renderFriends, friend: renderFriend, fEx: renderFriendExercise, settings: renderSettings };
   clearInterval(timerTick);
   app.ontouchstart = app.ontouchend = null;
   VIEWS[state.views[state.tab]]();
@@ -529,7 +552,7 @@ function render() {
   renderDock();
   renderSheet();
 }
-const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, finish: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2 };
+const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, finish: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, fEx: 2 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
 function ghost(onTop) {
@@ -566,7 +589,8 @@ function renderDock() {
   // Today stays in the middle
   const tabs = [['friends', 'Friends', ICON_FRIENDS], ['workouts', 'Workouts', ICON_WORKOUTS], ['today', 'Today', ICON_TODAY], ['exercises', 'Exercises', ICON_EXERCISES], ['settings', 'Settings', ICON_SETTINGS]];
   const dock = $('dock');
-  dock.innerHTML = tabs.map(([t, label, icon]) => `<button data-tab="${t}" class="${state.tab === t ? 'on' : ''}">${icon}<span>${label}</span></button>`).join('');
+  const reqs = (typeof friends !== 'undefined' && cloud.user) ? friends.links.filter(l => l.status === 'pending' && l.from !== cloud.user.uid).length : 0;
+  dock.innerHTML = tabs.map(([t, label, icon]) => `<button data-tab="${t}" class="${state.tab === t ? 'on' : ''}" aria-label="${label}${t === 'friends' && reqs ? `, ${reqs} new` : ''}">${icon}${t === 'friends' && reqs ? `<span class="tab-badge">${reqs}</span>` : ''}<span>${label}</span></button>`).join('');
   dock.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
     const t = b.dataset.tab;
     if (state.tab === t) { go(TAB_ROOT[t]); return; }
@@ -1123,7 +1147,7 @@ const STATS = [
 ];
 function seriesFor(exId, key) {
   const byDate = {};
-  data.sets.filter(s => s.exId === exId).forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
+  (state.statSrc || data.sets).filter(s => s.exId === exId).forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
   return Object.keys(byDate).sort().map(k => {
     const ss = byDate[k];
     let v, note;
@@ -1158,7 +1182,9 @@ function wireProgress(exId) {
   drawChart($('chart'), seriesFor(exId, state.stat), STATS.find(s => s.key === state.stat));
 }
 function historyHTML(exId) {
-  const dates = [...new Set(data.sets.filter(s => s.exId === exId).map(s => s.date))].sort().reverse();
+  const src = state.statSrc || data.sets;
+  const setsFor = (id, k) => src.filter(s => s.exId === id && s.date === k).sort((a, b) => a.slot - b.slot || a.ts - b.ts);
+  const dates = [...new Set(src.filter(s => s.exId === exId).map(s => s.date))].sort().reverse();
   return `<div class="section">History</div>` + (dates.length ? dates.map(k => {
     const ss = setsFor(exId, k);
     const best = Math.max(...ss.map(e1rm));
@@ -1617,6 +1643,7 @@ async function initCloud() {
     fb.getRedirectResult(cloud.auth).catch(e => { cloud.authError = friendlyAuthError(e); render(); });
     fb.onAuthStateChanged(cloud.auth, user => {
       stopListening();
+      stopFriends();
       cloud.user = user;
       if (user) startSync(); else setCloudStatus('off');
       if (!state.sheet || state.sheet.type !== 'signin') render();
@@ -1674,6 +1701,7 @@ async function startSync() {
       if (!state.sheet) render();
     }
     listen();
+    startFriends();
     await pushChanges();                                       // upload anything only this device has
   } catch (e) {
     setCloudStatus(navigator.onLine ? 'error' : 'offline', e.code || e.message);
@@ -1817,7 +1845,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.12';
+const APP_VERSION = '0.13';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -1880,7 +1908,7 @@ function renderSettings() {
     await cloud.fb.signOut(cloud.auth);
   };
   const name = $('pName');
-  name.oninput = () => { st.name = name.value; save(); app.querySelector('.avatar').textContent = (name.value.trim()[0] || '?').toUpperCase(); };
+  name.oninput = () => { st.name = name.value; save(); syncMyNameSoon(); app.querySelector('.avatar').textContent = (name.value.trim()[0] || '?').toUpperCase(); };
   app.querySelectorAll('[data-set]').forEach(g => g.querySelectorAll('button').forEach(b => b.onclick = () => {
     const key = g.dataset.set;
     const v = key === 'weekStart' ? Number(b.dataset.v) : b.dataset.v;
@@ -1931,22 +1959,309 @@ function renderSettings() {
   };
 }
 
-/* ================= FRIENDS tab (placeholder) ================= */
+/* ================= FRIENDS ================= */
+// Friends are a symmetric link between two people (links/{uidA_uidB}). Each person controls their own
+// switches on the link: share[myUid] = whether the other person can see my training (read-only).
+// Invites use a short code (codes/{CODE} → uid + name) or a link to the app with #add-CODE.
+const friends = { links: [], unsub: null, cache: {}, exCache: {}, error: '', nameTimer: null };
+const pairId = (a, b) => (a < b ? a + '_' + b : b + '_' + a);
+const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newCode = () => Array.from({ length: 6 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
+const fmtCode = c => (c ? c.slice(0, 3) + '-' + c.slice(3) : '');
+const cleanCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+const myName = () => (data.settings.name || '').trim() || (cloud.user && (cloud.user.displayName || (cloud.user.email || '').split('@')[0])) || 'Someone';
+const otherOf = l => l.members.find(m => m !== cloud.user.uid);
+const nameOf = l => (l.names && l.names[otherOf(l)]) || 'Friend';
+const inviteUrl = () => location.origin + location.pathname + '#add-' + data.settings.code;
+const isPerm = e => String((e && (e.code || e.message)) || '').includes('permission');
+const initialOf = n => (String(n).trim()[0] || '?').toUpperCase();
+
+function startFriends() {
+  const fb = cloud.fb, uid = cloud.user.uid;
+  friends.error = '';
+  ensureCode();
+  friends.unsub = fb.onSnapshot(fb.query(fb.collection(cloud.db, 'links'), fb.where('members', 'array-contains', uid)), snap => {
+    friends.links = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    friends.links.forEach(l => { if (!l.names || l.names[uid] !== myName()) fb.updateDoc(fb.doc(cloud.db, 'links', l.id), { ['names.' + uid]: myName(), u: Date.now() }).catch(() => {}); });
+    renderDock();
+    if (['friends', 'friend'].includes(state.views.friends) && state.tab === 'friends' && !state.sheet) render();
+  }, e => { friends.error = isPerm(e) ? 'rules' : (e.code || e.message); if (state.tab === 'friends') render(); });
+  if (state.inviteCode) openSheet({ type: 'addFriend', code: state.inviteCode, auto: true }), (state.inviteCode = null);
+}
+function stopFriends() { if (friends.unsub) friends.unsub(); friends.unsub = null; friends.links = []; friends.cache = {}; friends.exCache = {}; }
+
+// Each account gets one friend code, reserved in codes/{CODE}
+async function ensureCode() {
+  const fb = cloud.fb, uid = cloud.user.uid;
+  try {
+    if (data.settings.code) {
+      await fb.setDoc(fb.doc(cloud.db, 'codes', data.settings.code), { uid, name: myName() });
+      return;
+    }
+    for (let i = 0; i < 6; i++) {
+      const code = newCode();
+      const ref = fb.doc(cloud.db, 'codes', code);
+      const ex = await fb.getDoc(ref);
+      if (ex.exists()) continue;
+      await fb.setDoc(ref, { uid, name: myName() });
+      data.settings.code = code; save();
+      if (state.tab === 'friends') render();
+      return;
+    }
+  } catch (e) {
+    if (isPerm(e) && data.settings.code && !friends.retried) { friends.retried = true; data.settings.code = ''; return ensureCode(); }
+    friends.error = isPerm(e) ? 'rules' : (e.code || e.message);
+    if (state.tab === 'friends') render();
+  }
+}
+function syncMyNameSoon() {
+  if (!cloud.user || !friends.unsub) return;
+  clearTimeout(friends.nameTimer);
+  friends.nameTimer = setTimeout(() => {
+    const fb = cloud.fb, uid = cloud.user.uid;
+    if (data.settings.code) fb.setDoc(fb.doc(cloud.db, 'codes', data.settings.code), { uid, name: myName() }).catch(() => {});
+    friends.links.forEach(l => fb.updateDoc(fb.doc(cloud.db, 'links', l.id), { ['names.' + uid]: myName(), u: Date.now() }).catch(() => {}));
+  }, 1500);
+}
+
+async function lookupCode(code) {
+  const snap = await cloud.fb.getDoc(cloud.fb.doc(cloud.db, 'codes', code));
+  return snap.exists() ? snap.data() : null;
+}
+async function sendFriendRequest(other, otherName, share) {
+  const fb = cloud.fb, me = cloud.user.uid, id = pairId(me, other), ref = fb.doc(cloud.db, 'links', id);
+  const ex = await fb.getDoc(ref);
+  if (ex.exists()) {
+    const l = { id, ...ex.data() };
+    if (l.status === 'pending' && l.from === other) return acceptFriend(l, share);   // they already asked you
+    throw new Error(l.status === 'accepted' ? "You're already friends." : 'Request already sent.');
+  }
+  await fb.setDoc(ref, { members: [me, other].sort(), from: me, status: 'pending', share: { [me]: !!share }, names: { [me]: myName(), [other]: otherName || 'Friend' }, u: Date.now() });
+}
+const acceptFriend = (l, share) => cloud.fb.updateDoc(cloud.fb.doc(cloud.db, 'links', l.id), { status: 'accepted', ['share.' + cloud.user.uid]: !!share, ['names.' + cloud.user.uid]: myName(), u: Date.now() });
+const setShare = (l, on) => cloud.fb.updateDoc(cloud.fb.doc(cloud.db, 'links', l.id), { ['share.' + cloud.user.uid]: on, u: Date.now() });
+const removeLink = l => cloud.fb.deleteDoc(cloud.fb.doc(cloud.db, 'links', l.id));
+
+// A friend's training (read-only): exercises + the last 120 days of sets and days
+async function loadFriend(uid, force) {
+  const c = friends.cache[uid];
+  if (c && !force && Date.now() - c.at < 5 * 60 * 1000) return c;
+  const fb = cloud.fb, col = n => fb.collection(cloud.db, 'users', uid, n);
+  const cutoff = dk(addDays(new Date(), -120));
+  const [ex, sets, days] = await Promise.all([
+    fb.getDocs(col('exercises')),
+    fb.getDocs(fb.query(col('sets'), fb.where('date', '>=', cutoff))),
+    fb.getDocs(fb.query(col('days'), fb.where(fb.documentId(), '>=', cutoff))),
+  ]);
+  const live = s => s.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => !x.deleted);
+  const out = { exercises: live(ex), sets: live(sets), days: Object.fromEntries(live(days).map(d => [d.id, d])), at: Date.now() };
+  friends.cache[uid] = out;
+  return out;
+}
+async function loadFriendExercise(uid, exId) {
+  const key = uid + '|' + exId;
+  if (friends.exCache[key] && Date.now() - friends.exCache[key].at < 5 * 60 * 1000) return friends.exCache[key].sets;
+  const fb = cloud.fb;
+  const snap = await fb.getDocs(fb.query(fb.collection(cloud.db, 'users', uid, 'sets'), fb.where('exId', '==', exId)));
+  const sets = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => !x.deleted);
+  friends.exCache[key] = { sets, at: Date.now() };
+  return sets;
+}
+
+const RULES_HELP = `<div class="group hero" style="text-align:left">
+  <h2 style="text-align:center">One more Firebase step</h2>
+  <p>Friends needs updated security rules. In the Firebase console, open Firestore → Rules, replace them with the new rules from Claude, and click Publish. Then reopen the app.</p></div>`;
+
 function renderFriends() {
+  const head = `<header class="nav"><span class="spacer"></span>${cloud.user ? `<button class="circle glass" id="addF" aria-label="Add friend">${svg('<path d="M12 5v14M5 12h14"/>', 20, 2.4)}</button>` : ''}</header>
+    <div class="large-title">Friends</div>`;
+  if (!cloud.user) {
+    app.innerHTML = head + `
+      <div class="group hero">
+        <div class="hero-icon">${svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M16.5 14.6c2.4.2 4 1.7 4.5 4.4"/>', 40, 1.8)}</div>
+        <h2>Train together</h2>
+        <p>Add friends, share your training, and follow each other's progress. Sign in to get started.</p>
+      </div>
+      <button class="primary" id="fSignIn">Sign in</button>`;
+    $('fSignIn').onclick = () => openSheet({ type: 'signin' });
+    return;
+  }
+  if (friends.error === 'rules') { app.innerHTML = head + RULES_HELP; return; }
+  const me = cloud.user.uid;
+  const incoming = friends.links.filter(l => l.status === 'pending' && l.from !== me);
+  const outgoing = friends.links.filter(l => l.status === 'pending' && l.from === me);
+  const accepted = friends.links.filter(l => l.status === 'accepted').sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+  const avatar = n => `<span class="avatar sm">${esc(initialOf(n))}</span>`;
+  app.innerHTML = head + `
+    <div class="group code-card">
+      <div class="lb-label">Your friend code</div>
+      <div class="code">${data.settings.code ? esc(fmtCode(data.settings.code)) : '<span style="color:var(--label3)">······</span>'}</div>
+      <div class="code-btns">
+        <button class="capsule glass" id="shareInv" ${data.settings.code ? '' : 'disabled'}>${svg('<path d="M12 3v12M7 8l5-5 5 5M5 14v5h14v-5"/>', 17, 2)} Share invite</button>
+        <button class="capsule glass" id="copyCode" ${data.settings.code ? '' : 'disabled'}>${svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>', 17, 2)} <span id="copyLbl">Copy code</span></button>
+      </div>
+    </div>
+    ${friends.error ? `<div class="err">${esc(friends.error)}</div>` : ''}
+    ${incoming.length ? `<div class="section">Requests</div><div class="group">${incoming.map(l => `
+      <div class="set-row"><span class="main">${avatar(nameOf(l))}${esc(nameOf(l))}</span>
+        <span style="display:flex;gap:6px"><button class="capsule tint-fill" data-acc="${l.id}">Accept</button><button class="circle" data-dec="${l.id}" aria-label="Decline" style="width:36px;height:36px;color:var(--label2)">${ICON_X}</button></span></div>`).join('')}</div>` : ''}
+    <div class="section">Friends</div>
+    ${accepted.length ? `<div class="group">${accepted.map(l => {
+      const o = otherOf(l), theyShare = l.share && l.share[o], iShare = l.share && l.share[me];
+      return `<button class="cell" data-friend="${l.id}"><span class="avatar sm">${esc(initialOf(nameOf(l)))}</span><span class="main"><div>${esc(nameOf(l))}</div>
+        <div class="sub">${theyShare ? 'Shares their training' : 'Not sharing'}${iShare ? ' · you share yours' : ''}</div></span><span class="chev">${ICON_CHEV}</span></button>`;
+    }).join('')}</div>` : `<div class="group"><div class="empty">No friends yet. Share your code, or tap + to add someone by their code.</div></div>`}
+    ${outgoing.length ? `<div class="section">Sent</div><div class="group">${outgoing.map(l => `
+      <div class="set-row"><span class="main">${avatar(nameOf(l))}${esc(nameOf(l))}</span>
+        <span style="display:flex;align-items:center;gap:8px"><span class="badge">Waiting</span><button class="circle" data-dec="${l.id}" aria-label="Cancel request" style="width:36px;height:36px;color:var(--label2)">${ICON_X}</button></span></div>`).join('')}</div>` : ''}`;
+
+  $('addF').onclick = () => openSheet({ type: 'addFriend', code: '' });
+  $('shareInv').onclick = async () => {
+    const text = `Add me on Training tracker — my friend code is ${fmtCode(data.settings.code)}`;
+    try { if (navigator.share) { await navigator.share({ title: 'Training tracker', text, url: inviteUrl() }); return; } } catch (e) { if (e.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(text + '\n' + inviteUrl()); $('copyLbl').textContent = 'Copied'; } catch (e) {}
+  };
+  $('copyCode').onclick = async () => { try { await navigator.clipboard.writeText(fmtCode(data.settings.code)); $('copyLbl').textContent = 'Copied'; setTimeout(() => { const c = $('copyLbl'); if (c) c.textContent = 'Copy code'; }, 1500); } catch (e) {} };
+  app.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => openSheet({ type: 'acceptFriend', id: b.dataset.acc }));
+  app.querySelectorAll('[data-dec]').forEach(b => b.onclick = () => { const l = friends.links.find(x => x.id === b.dataset.dec); if (l) removeLink(l).catch(e => { friends.error = e.code || e.message; render(); }); });
+  app.querySelectorAll('[data-friend]').forEach(b => b.onclick = () => go('friend', { friendLink: b.dataset.friend }));
+}
+
+function renderFriend() {
+  const l = friends.links.find(x => x.id === state.friendLink && x.status === 'accepted');
+  if (!l) return go('friends');
+  const me = cloud.user.uid, o = otherOf(l), name = nameOf(l);
+  const theyShare = l.share && l.share[o], iShare = !!(l.share && l.share[me]);
+  const c = friends.cache[o];
+  let body = '';
+  if (!theyShare) body = `<div class="group"><div class="empty">${esc(name)} isn't sharing their training with you.</div></div>`;
+  else if (state.friendErr) body = `<div class="err">${esc(state.friendErr)}</div>`;
+  else if (!c) body = `<div class="group"><div class="empty">Loading ${esc(name)}'s training…</div></div>`;
+  else {
+    const since30 = dk(addDays(new Date(), -30));
+    const dates = [...new Set(c.sets.map(s => s.date))].sort().reverse();
+    const recent = dates.filter(d => d >= since30);
+    const exName = id => { const e = c.exercises.find(x => x.id === id); return e ? e.name : 'Exercise'; };
+    const usedEx = c.exercises.filter(e => c.sets.some(s => s.exId === e.id)).sort(byName);
+    body = `
+      <div class="stat-row"><div class="stat"><div class="stat-n">${recent.length}</div><div class="stat-l">workouts, last 30 days</div></div>
+        <div class="stat"><div class="stat-n">${c.sets.filter(s => s.date >= since30).length}</div><div class="stat-l">sets, last 30 days</div></div></div>
+      <div class="section">Recent workouts</div>
+      ${dates.length ? dates.slice(0, 12).map(k => {
+        const ss = c.sets.filter(s => s.date === k), d = c.days[k];
+        const byEx = [...new Set(ss.map(s => s.exId))];
+        const title = d && d.workouts && d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Workout';
+        const dur = d && d.session && d.session.end ? ` · ${fmtMins(d.session.end - d.session.start)}` : '';
+        return `<div class="hcard"><div class="hcard-head"><b>${title}</b><span>${fmtDayYear(k)}${dur}</span></div>
+          ${byEx.map(id => `<div class="hset"><span class="fx">${esc(exName(id))}</span><span class="v">${ss.filter(s => s.exId === id).sort((a, b) => a.slot - b.slot).map(s => `${W(s.weight)}×${s.reps}`).join(', ')}</span></div>`).join('')}</div>`;
+      }).join('') : `<div class="group"><div class="empty">No workouts in the last 4 months.</div></div>`}
+      ${usedEx.length ? `<div class="section">Exercises</div><div class="group">${usedEx.map(e => {
+        const best = Math.max(...c.sets.filter(s => s.exId === e.id).map(e1rm));
+        return cell({ attrs: `data-fex="${e.id}"`, main: esc(e.name), detail: `${fmtStat(toU(best), 'e1rm')} ${U()}` });
+      }).join('')}</div><div class="footnote">Best estimated 1RM in the last 4 months.</div>` : ''}`;
+  }
   app.innerHTML = `
-    <header class="nav"></header>
-    <div class="large-title">Friends</div>
-    <div class="group hero">
-      <div class="hero-icon">${svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M16.5 14.6c2.4.2 4 1.7 4.5 4.4"/>', 40, 1.8)}</div>
-      <h2>Train together</h2>
-      <p>Connect with friends, share workouts and splits, and follow each other's progress. Coming soon.</p>
-    </div>`;
+    <header class="nav">${backBtn('Friends')}<span class="spacer"></span>${theyShare ? `<button class="circle glass" id="fRefresh" aria-label="Refresh">${svg('<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>', 18, 2.2)}</button>` : ''}</header>
+    <div class="friend-head"><span class="avatar">${esc(initialOf(name))}</span><div class="large-title" style="margin:0">${esc(name)}</div></div>
+    ${body}
+    <div class="section">Your sharing</div>
+    <div class="group"><label class="set-row"><span class="lbl">Share my training with ${esc(name)}</span>
+      <input type="checkbox" class="switch" id="shareSw" ${iShare ? 'checked' : ''}></label></div>
+    <div class="footnote">${esc(name)} can see your workouts, sets and progress, but can't change anything.</div>
+    <div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'unfriend' ? 'confirm' : ''}" id="unfriend">${state.pending === 'unfriend' ? 'Tap again to remove' : 'Remove friend'}</button></div>`;
+  $('back').onclick = () => go('friends');
+  $('shareSw').onchange = e => setShare(l, e.target.checked).catch(err => { friends.error = err.code || err.message; });
+  $('unfriend').onclick = () => {
+    if (state.pending !== 'unfriend') { state.pending = 'unfriend'; return render(); }
+    state.pending = null; removeLink(l).then(() => go('friends'));
+  };
+  if ($('fRefresh')) $('fRefresh').onclick = () => { delete friends.cache[o]; render(); };
+  app.querySelectorAll('[data-fex]').forEach(b => b.onclick = () => go('fEx', { friendEx: b.dataset.fex, stat: 'e1rm' }));
+  if (theyShare && !c && !state.friendLoading) {
+    state.friendLoading = true; state.friendErr = '';
+    loadFriend(o).then(() => { state.friendLoading = false; if (state.views.friends === 'friend') render(); })
+      .catch(e => { state.friendLoading = false; state.friendErr = isPerm(e) ? "Couldn't load — check that the new Firebase rules are published." : (e.code || e.message); if (state.views.friends === 'friend') render(); });
+  }
+}
+
+// A friend's exercise: same graph and history as your own, read-only
+function renderFriendExercise() {
+  const l = friends.links.find(x => x.id === state.friendLink);
+  if (!l) return go('friends');
+  const o = otherOf(l), c = friends.cache[o];
+  const ex = c && c.exercises.find(e => e.id === state.friendEx);
+  if (!ex) return go('friend');
+  const key = o + '|' + ex.id, cached = friends.exCache[key];
+  app.innerHTML = `
+    <header class="nav">${backBtn(nameOf(l))}</header>
+    <div class="eyebrow">${esc(nameOf(l))}</div>
+    <div class="large-title">${esc(ex.name)}</div>
+    ${cached ? (state.statSrc = cached.sets, progressHTML(ex.id) + historyHTML(ex.id)) : '<div class="group"><div class="empty">Loading…</div></div>'}`;
+  $('back').onclick = () => go('friend');
+  if (cached) { wireProgress(ex.id); state.statSrc = null; }
+  else loadFriendExercise(o, ex.id).then(() => { if (state.views.friends === 'fEx') render(); }).catch(() => {});
+}
+
+/* Sheet: add a friend by code */
+function sheetAddFriend(el) {
+  const s = state.sheet;
+  if (s.share === undefined) s.share = true;
+  el.innerHTML = sheetOpen('Add friend', `${closeBtn('sCancel')}<b>Add friend</b><span></span>`, `
+    <div class="finish-sub" style="margin:0 8px 12px">Ask your friend for their code. It's at the top of their Friends tab.</div>
+    <div class="group"><input class="field-input code-input" id="fCode" placeholder="ABC-123" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(fmtCode(cleanCode(s.code)))}"></div>
+    ${s.found ? `
+      <div class="group" style="margin-top:14px"><div class="profile"><span class="avatar">${esc(initialOf(s.found.name))}</span><div><div style="font-weight:600;font-size:18px">${esc(s.found.name)}</div><div class="sub" style="color:var(--label2);font-size:14px">${esc(fmtCode(cleanCode(s.code)))}</div></div></div>
+        <label class="set-row"><span class="lbl">Share my training with them</span><input type="checkbox" class="switch" id="fShare" ${s.share ? 'checked' : ''}></label></div>
+      <div class="footnote">You can change this any time on their page.</div>` : ''}
+    <div class="err" id="fErr">${esc(s.err || '')}</div>
+    <button class="primary" id="fGo">${s.found ? 'Send friend request' : 'Find'}</button>`);
+  const inp = $('fCode');
+  inp.oninput = () => { const c = cleanCode(inp.value); inp.value = c.length > 3 ? fmtCode(c) : c; if (c !== cleanCode(s.code)) { s.code = c; if (s.found) { s.found = null; s.err = ''; renderSheet(); $('fCode').focus(); } } };
+  if ($('fShare')) $('fShare').onchange = e => { s.share = e.target.checked; };
+  $('sCancel').onclick = () => closeSheet();
+  const find = async () => {
+    const code = cleanCode(s.code);
+    if (code.length !== 6) { s.err = 'Codes have 6 characters.'; return renderSheet(); }
+    if (code === data.settings.code) { s.err = "That's your own code."; return renderSheet(); }
+    $('fGo').disabled = true;
+    try {
+      const f = await lookupCode(code);
+      if (!f) { s.err = 'No one has that code. Check it and try again.'; s.found = null; }
+      else if (f.uid === cloud.user.uid) { s.err = "That's your own code."; }
+      else { s.found = f; s.err = ''; }
+    } catch (e) { s.err = isPerm(e) ? 'Friends needs the new Firebase rules first.' : "Couldn't look that up. Check your connection."; }
+    renderSheet();
+  };
+  $('fGo').onclick = async () => {
+    if (!s.found) return find();
+    $('fGo').disabled = true;
+    try { await sendFriendRequest(s.found.uid, s.found.name, s.share); closeSheet(); render(); }
+    catch (e) { s.err = isPerm(e) ? 'Friends needs the new Firebase rules first.' : (e.message || e.code); renderSheet(); }
+  };
+  if (s.auto) { s.auto = false; find(); }
+}
+
+/* Sheet: accept a request (choose whether to share back) */
+function sheetAcceptFriend(el) {
+  const s = state.sheet, l = friends.links.find(x => x.id === s.id);
+  if (!l) { closeSheet(); return; }
+  if (s.share === undefined) s.share = true;
+  const name = nameOf(l);
+  el.innerHTML = sheetOpen('Accept', `${closeBtn('sCancel')}<b>Friend request</b><span></span>`, `
+    <div class="group"><div class="profile"><span class="avatar">${esc(initialOf(name))}</span><div style="font-weight:600;font-size:18px">${esc(name)}</div></div>
+      <label class="set-row"><span class="lbl">Share my training with ${esc(name)}</span><input type="checkbox" class="switch" id="aShare" ${s.share ? 'checked' : ''}></label></div>
+    <div class="footnote">${l.share && l.share[l.from] ? `${esc(name)} is sharing their training with you.` : `${esc(name)} isn't sharing their training yet.`}</div>
+    <div class="err" id="aErr">${esc(s.err || '')}</div>
+    <button class="primary" id="aOk">Accept</button>`);
+  $('aShare').onchange = e => { s.share = e.target.checked; };
+  $('sCancel').onclick = () => closeSheet();
+  $('aOk').onclick = async () => { $('aOk').disabled = true; try { await acceptFriend(l, s.share); closeSheet(); render(); } catch (e) { s.err = isPerm(e) ? 'Friends needs the new Firebase rules first.' : (e.code || e.message); renderSheet(); } };
 }
 
 /* ================= Swipe down to close ================= */
 // Pull a slid-up screen (or a sheet) down from the top to close it. It follows your finger,
 // the screen underneath grows back into place, and letting go early springs it back.
-const PULL_BACK = { log: 'day', finish: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList' };
+const PULL_BACK = { log: 'day', finish: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList', friend: 'friends', fEx: 'friend' };
 (function pullToClose() {
   let p = null;
   const ease = '.32s cubic-bezier(.2,.85,.3,1)';
@@ -2040,7 +2355,8 @@ function renderSheet() {
   if (!state.sheet) { el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); return; }
   el.hidden = false; document.body.classList.add('locked');
   ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration, signin: sheetSignin,
-     planDay: sheetPlanDay, planStart: sheetPlanStart, planShift: sheetPlanShift })[state.sheet.type](el);
+     planDay: sheetPlanDay, planStart: sheetPlanStart, planShift: sheetPlanShift,
+     addFriend: sheetAddFriend, acceptFriend: sheetAcceptFriend })[state.sheet.type](el);
 }
 const sheetOpen = (label, head, body) => `<div class="backdrop"></div><div class="sheet" role="dialog" aria-label="${esc(label)}"><div class="sheet-head">${head}</div>${body}</div>`;
 
@@ -2154,6 +2470,12 @@ function sheetSetCount(el) {
   $('sOk').onclick = () => { it.sets = SET_OPTIONS[wheelIndex('wSets')].v; closeSheet(); render(); };
 }
 
+// Opening an invite link (…#add-ABC123) jumps to Friends and looks the code up once you're signed in
+if (/^#add-/i.test(location.hash)) {
+  state.inviteCode = cleanCode(location.hash.slice(5));
+  state.tab = 'friends';
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+}
 applyTheme();
 render();
 initCloud();
