@@ -245,6 +245,37 @@
   .wheel-opt.on { color: var(--label); font-weight: 500; }
   .wheel-band { position: absolute; left: 0; right: 0; top: 70px; height: 40px; background: var(--fill); border-radius: 12px; pointer-events: none; }
 
+  /* Reorder + trash */
+  .drag-row { display: flex; align-items: center; background: var(--card); transition: transform .2s cubic-bezier(.2,.8,.3,1); }
+  .drag-row .cell { flex: 1; min-width: 0; }
+  .drag-row.dragging { transition: none; z-index: 2; box-shadow: 0 10px 30px rgba(0,0,0,.18); border-radius: 14px; }
+  .sorting { user-select: none; -webkit-user-select: none; }
+  .grip { width: 44px; height: 52px; display: flex; align-items: center; justify-content: center; color: var(--label3); touch-action: none; flex: none; cursor: grab; }
+  .trash { min-width: 44px; height: 36px; margin-right: 10px; padding: 0 8px; border-radius: 18px; display: flex; align-items: center; justify-content: center; color: var(--red); flex: none; font-size: 15px; font-weight: 600; transition: all .2s; }
+  .trash:active { background: var(--red-soft); }
+  .trash.confirm { background: var(--red); color: #fff; padding: 0 14px; }
+
+  /* Exercise pager */
+  .eyebrow { font-size: 13px; font-weight: 600; color: var(--label2); margin: 2px 2px 2px; }
+  .eyebrow + .large-title { margin-top: 0; }
+  body.has-exnav #app { padding-bottom: calc(180px + env(safe-area-inset-bottom)); }
+  .exnav { position: fixed; left: 50%; transform: translateX(-50%); width: min(calc(100% - 40px), 560px); bottom: calc(86px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 9; pointer-events: none; }
+  .exnav-btn { pointer-events: auto; max-width: 48%; padding: 0 14px; font-size: 15px; }
+  .exnav-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .exnav-btn[hidden] { display: none; }
+  .slide-wrap.from-right { animation: fromRight .28s cubic-bezier(.2,.9,.3,1); }
+  .slide-wrap.from-left { animation: fromLeft .28s cubic-bezier(.2,.9,.3,1); }
+  @keyframes fromRight { from { transform: translateX(40px); opacity: 0; } }
+  @keyframes fromLeft { from { transform: translateX(-40px); opacity: 0; } }
+
+  /* Session timer */
+  .timer { height: 40px; padding: 0 14px; font-size: 15px; font-weight: 600; font-family: var(--rounded); font-variant-numeric: tabular-nums; gap: 6px; }
+  .timer.running { color: var(--label); }
+  .timer .rec { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .timer.ended { color: var(--green); }
+  .timer.confirm { background: var(--red); color: #fff; box-shadow: none; }
+
   /* Floating tab bar */
   #dock {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 10;
@@ -361,6 +392,9 @@ const backBtn = label => `<button class="circle glass" id="back" aria-label="Bac
 const closeBtn = (id, label = 'Cancel') => `<button class="circle glass" id="${id}" aria-label="${label}">${ICON_X}</button>`;
 const okBtn = (id, label = 'Save') => `<button class="circle prominent" id="${id}" aria-label="${label}">${ICON_OK}</button>`;
 const plusLead = `<span class="plus">${ICON_PLUS}</span>`;
+const ICON_TRASH = svg('<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6"/>', 20, 1.9);
+const ICON_GRIP = svg('<path d="M5 9h14M5 15h14"/>', 20, 2.2);
+const ICON_TIMER = svg('<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M9.5 2.5h5"/>', 18, 2);
 
 /* ================= State & routing ================= */
 const state = {
@@ -386,6 +420,9 @@ const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList' };
 function render() {
   const VIEWS = { day: renderDay, log: renderLog, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
                   wList: renderWorkoutList, wEdit: renderWorkoutEdit, eList: renderExerciseList, eDetail: renderExerciseDetail };
+  clearInterval(timerTick);
+  document.body.classList.remove('has-exnav');
+  app.ontouchstart = app.ontouchend = null;
   VIEWS[state.views[state.tab]]();
   if (saveError) app.insertAdjacentHTML('afterbegin', `<div id="status">${saveError}</div>`);
   renderDock();
@@ -437,6 +474,53 @@ const cell = ({ attrs = '', main, sub = '', detail = '', chev = true, cls = '' }
   `<button class="cell ${cls}" ${attrs}><span class="main"><div>${main}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</span>${detail ? `<span class="detail">${detail}</span>` : ''}${chev ? `<span class="chev">${ICON_CHEV}</span>` : ''}</button>`;
 const searchHTML = (id, ph) => `<label class="search">${ICON_SEARCH}<input id="${id}" placeholder="${ph}" autocomplete="off" type="search"></label>`;
 
+/* ================= Drag to reorder ================= */
+// Press and drag a row's grip handle; the other rows slide out of the way.
+function makeSortable(list, onMove) {
+  list.querySelectorAll('.drag-row .grip').forEach(grip => {
+    grip.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      const rows = [...list.querySelectorAll(':scope > .drag-row')];
+      const row = grip.closest('.drag-row');
+      const from = rows.indexOf(row);
+      const rects = rows.map(r => r.getBoundingClientRect());
+      const h = rects[from].height;
+      const y0 = e.clientY;
+      let to = from;
+      grip.setPointerCapture(e.pointerId);
+      list.classList.add('sorting');
+      row.classList.add('dragging');
+      const move = ev => {
+        const dy = Math.max(rects[0].top - rects[from].top - h * .6, Math.min(rects[rows.length - 1].top - rects[from].top + h * .6, ev.clientY - y0));
+        row.style.transform = `translateY(${dy}px)`;
+        const center = rects[from].top + h / 2 + dy;
+        to = from;
+        rows.forEach((r, j) => {
+          const mid = rects[j].top + rects[j].height / 2;
+          if (j > from && center > mid) to = j;
+          if (j < from && center < mid && to === from) to = j;
+        });
+        rows.forEach((r, j) => {
+          if (j === from) return;
+          const shift = (from < to && j > from && j <= to) ? -h : (to < from && j >= to && j < from) ? h : 0;
+          r.style.transform = shift ? `translateY(${shift}px)` : '';
+        });
+      };
+      const up = () => {
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        list.classList.remove('sorting');
+        if (to !== from) onMove(from, to);
+        else { row.classList.remove('dragging'); rows.forEach(r => { r.style.transform = ''; }); }
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+  });
+}
+
 /* ================= TODAY: day view ================= */
 function weekLabel(ws) {
   const we = addDays(ws, 6);
@@ -462,7 +546,12 @@ function renderDay() {
     const s = setsFor(it.exId, state.selected);
     const total = Math.max(it.sets || 0, s.length);
     const sub = s.length ? s.map(x => `${fmtW(x.weight)}×${x.reps}`).join(', ') : `${plural(total, 'set')} planned`;
-    return cell({ attrs: `data-ex="${it.exId}"`, main: esc(ex.name), sub, detail: s.length ? `${s.length}/${total}` : '' });
+    const confirm = state.pending === 'trash:' + it.exId;
+    return `<div class="cell-wrap drag-row" data-row="${it.exId}">
+      <button class="grip" aria-label="Drag to reorder ${esc(ex.name)}">${ICON_GRIP}</button>
+      <button class="cell" data-ex="${it.exId}" style="padding-left:4px"><span class="main"><div>${esc(ex.name)}</div><div class="sub">${s.length ? `${s.length}/${total} · ` : ''}${sub}</div></span></button>
+      <button class="trash ${confirm ? 'confirm' : ''}" data-trash="${it.exId}" aria-label="Remove ${esc(ex.name)}">${confirm ? 'Delete' : ICON_TRASH}</button>
+    </div>`;
   }).join('');
 
   app.innerHTML = `
@@ -475,8 +564,8 @@ function renderDay() {
     </header>
     <div class="week" id="week">${days}</div>
     <div class="day-title">${fmtLong(state.selected)}</div>
-    <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}</div>
-    ${day.items.length ? `<div class="group">${rows}</div>` : ''}
+    <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtDur(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
+    ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
     <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
 
   const shift = n => { state.weekStart = addDays(state.weekStart, 7 * n); render(); };
@@ -487,6 +576,22 @@ function renderDay() {
   $('addEx').onclick = () => go('picker', { pickerQuery: '', pickerMode: data.workouts.length ? 'workouts' : 'exercises' });
   app.querySelectorAll('.day').forEach(b => b.onclick = () => { state.selected = b.dataset.k; render(); });
   app.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => go('log', { logExId: b.dataset.ex }));
+  app.querySelectorAll('[data-trash]').forEach(b => b.onclick = () => {
+    const exId = b.dataset.trash, k = state.selected;
+    const hasSets = setsFor(exId, k).length > 0;
+    if (hasSets && state.pending !== 'trash:' + exId) { state.pending = 'trash:' + exId; return render(); }
+    const d = data.days[k];
+    d.items = d.items.filter(i => i.exId !== exId);
+    data.sets = data.sets.filter(x => !(x.exId === exId && x.date === k));
+    delete state.drafts[exId + '|' + k];
+    if (!d.items.length) delete data.days[k]; else syncSession(k);
+    save(); state.pending = null; render();
+  });
+  if ($('dayList')) makeSortable($('dayList'), (from, to) => {
+    const items = data.days[state.selected].items;
+    items.splice(to, 0, items.splice(from, 1)[0]);
+    save(); render();
+  });
 
   const wk = $('week');
   let x0 = null;
@@ -502,7 +607,9 @@ function renderDay() {
 function renderLog() {
   const ex = exById(state.logExId);
   const k = state.selected;
-  const item = ex && dayOf(k).items.find(i => i.exId === ex.id);
+  const day = dayOf(k);
+  const idx = ex ? day.items.findIndex(i => i.exId === ex.id) : -1;
+  const item = day.items[idx];
   if (!ex || !item) return go('day');
   const today = setsFor(ex.id, k);
   const bySlot = {};
@@ -539,12 +646,13 @@ function renderLog() {
   const canMinus = n > 0 && !bySlot[n - 1];
   const vid = ytId(ex.video);
   const hasInstr = ex.instructions || vid;
-  const removeLabel = state.pending === 'remove'
-    ? (today.length ? `Remove and delete ${plural(today.length, 'set')}?` : 'Tap again to remove')
-    : 'Remove from this day';
+  const prevEx = idx > 0 ? exById(day.items[idx - 1].exId) : null;
+  const nextEx = idx < day.items.length - 1 ? exById(day.items[idx + 1].exId) : null;
 
   app.innerHTML = `
-    <header class="nav">${backBtn(fmtShort(k))}</header>
+    <header class="nav">${backBtn(fmtShort(k))}<span class="spacer"></span>${timerHTML(k)}</header>
+    <div class="slide-wrap ${state.slide ? 'from-' + state.slide : ''}">
+    <div class="eyebrow">Exercise ${idx + 1} of ${day.items.length}</div>
     <div class="large-title">${esc(ex.name)}</div>
     <button class="lastbar" id="history">
       <span class="main"><span class="lb-label">${prevK ? `Last time · ${fmtShort(prevK)}` : 'Last time'}</span>
@@ -564,12 +672,33 @@ function renderLog() {
       <span>${plural(n, 'set')}</span>
       <button id="plus" aria-label="Add a set">+</button>
     </div>
-    <div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'remove' ? 'confirm' : ''}" id="remove">${removeLabel}</button></div>`;
+    </div>
+    <div class="exnav">
+      <button class="capsule glass exnav-btn" id="prevEx" ${prevEx ? '' : 'hidden'} aria-label="Previous exercise">${ICON_PREV}<span>${prevEx ? esc(prevEx.name) : ''}</span></button>
+      <span class="spacer"></span>
+      <button class="capsule glass exnav-btn" id="nextEx" ${nextEx ? '' : 'hidden'} aria-label="Next exercise"><span>${nextEx ? esc(nextEx.name) : ''}</span>${ICON_NEXT}</button>
+    </div>`;
+  state.slide = null;
+  document.body.classList.add('has-exnav');
 
+  const goTo = (j, dir) => { if (j < 0 || j >= day.items.length) return; go('log', { logExId: day.items[j].exId, slide: dir }); };
   $('back').onclick = () => go('day');
   $('history').onclick = () => go('history', { stat: 'e1rm' });
-  $('plus').onclick = () => { item.sets = n + 1; save(); state.pending = null; render(); };
-  $('minus').onclick = () => { if (!canMinus) return; item.sets = n - 1; delete drafts[n - 1]; save(); state.pending = null; render(); };
+  $('prevEx').onclick = () => goTo(idx - 1, 'left');
+  $('nextEx').onclick = () => goTo(idx + 1, 'right');
+  wireTimer(k);
+  const changed = () => { syncSession(k); save(); state.pending = null; render(); };
+  $('plus').onclick = () => { item.sets = n + 1; changed(); };
+  $('minus').onclick = () => { if (!canMinus) return; item.sets = n - 1; delete drafts[n - 1]; changed(); };
+
+  // Swipe left/right anywhere on the page (except in a text field) to change exercise
+  let t0 = null;
+  app.ontouchstart = e => { t0 = e.target.closest('input, textarea, .chart') ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+  app.ontouchend = e => {
+    if (!t0) return;
+    const dx = e.changedTouches[0].clientX - t0.x, dy = e.changedTouches[0].clientY - t0.y; t0 = null;
+    if (Math.abs(dx) > 70 && Math.abs(dy) < 50) goTo(dx < 0 ? idx + 1 : idx - 1, dx < 0 ? 'right' : 'left');
+  };
 
   app.querySelectorAll('.setrow').forEach(row => {
     const i = Number(row.dataset.i);
@@ -592,7 +721,7 @@ function renderLog() {
       if (done) {
         drafts[i] = { w: fmtW(done.weight), r: String(done.reps) };
         data.sets = data.sets.filter(s => s.id !== done.id);
-        save(); render(); return;
+        changed(); return;
       }
       const w = parseW(wIn.value), r = parseR(rIn.value);
       if (isNaN(w)) wIn.classList.add('bad');
@@ -601,19 +730,53 @@ function renderLog() {
       data.sets.push({ id: uid(), exId: ex.id, date: k, slot: i, weight: w, reps: r, ts: Date.now() });
       delete drafts[i];
       if (i + 1 > (item.sets || 0)) item.sets = i + 1;
-      save(); state.pending = null; render();
+      const s = ensureDay(k);
+      if (!s.session) s.session = { start: Date.now() }; // first logged set starts the timer
+      changed();
+      // TODO: show a workout summary here once the last set of the workout is logged
     };
   });
+}
 
-  $('remove').onclick = () => {
-    if (state.pending !== 'remove') { state.pending = 'remove'; return render(); }
-    const day = data.days[k];
-    day.items = day.items.filter(i => i.exId !== ex.id);
-    if (!day.items.length) delete data.days[k];
-    data.sets = data.sets.filter(s => !(s.exId === ex.id && s.date === k));
-    delete state.drafts[dkey];
-    save(); go('day');
+/* ================= Session timer ================= */
+let timerTick = null;
+const fmtDur = ms => {
+  const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+};
+function workoutComplete(k) {
+  const day = dayOf(k);
+  return day.items.length > 0 && day.items.every(it => {
+    const logged = setsFor(it.exId, k).length;
+    return logged > 0 && logged >= (it.sets || 0);
+  });
+}
+// The timer stops by itself when every planned set is done, and resumes if that stops being true.
+function syncSession(k) {
+  const s = data.days[k] && data.days[k].session;
+  if (!s || !s.start) return;
+  if (workoutComplete(k)) { if (!s.end) { s.end = Date.now(); s.auto = true; } }
+  else if (s.end && s.auto) { delete s.end; delete s.auto; }
+}
+function timerHTML(k) {
+  const s = dayOf(k).session;
+  if (!s) return `<button class="capsule glass timer" id="timer" aria-label="Start session timer">${ICON_TIMER}<span>Start</span></button>`;
+  if (s.end) return `<button class="capsule glass timer ended" id="timer" aria-label="Session finished">${ICON_OK}<span>${fmtDur(s.end - s.start)}</span></button>`;
+  if (state.pending === 'finish') return `<button class="capsule glass timer confirm" id="timer">Finish workout?</button>`;
+  return `<button class="capsule glass timer running" id="timer" aria-label="Session time, tap to finish"><span class="rec"></span><span id="timerText">${fmtDur(Date.now() - s.start)}</span></button>`;
+}
+function wireTimer(k) {
+  const btn = $('timer');
+  btn.onclick = () => {
+    const day = ensureDay(k);
+    const s = day.session;
+    if (!s) { day.session = { start: Date.now() }; save(); return render(); }
+    if (s.end) return;
+    if (state.pending !== 'finish') { state.pending = 'finish'; return render(); }
+    s.end = Date.now(); s.auto = false; save(); state.pending = null; render();
   };
+  const s = dayOf(k).session;
+  if (s && !s.end) timerTick = setInterval(() => { const t = $('timerText'); if (t) t.textContent = fmtDur(Date.now() - s.start); }, 1000);
 }
 
 /* ================= TODAY: add exercise / workout ================= */
@@ -887,16 +1050,17 @@ function renderWorkoutEdit() {
   if (!dr) return go('wList');
   const rows = dr.items.map((it, i) => {
     const ex = exById(it.exId);
-    return `<div class="cell-wrap" style="display:flex;align-items:center">
+    return `<div class="cell-wrap drag-row" style="display:flex;align-items:center">
       <button class="circle" data-rm="${i}" aria-label="Remove" style="color:var(--red);margin-left:8px;width:36px;height:36px">${svg('<circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="M8 12h8" stroke="#fff" stroke-width="2.2"/>', 22)}</button>
-      ${cell({ attrs: `data-sets="${i}" style="padding-left:4px"`, main: esc(ex ? ex.name : 'Deleted exercise'), detail: plural(it.sets, 'set') })}
+      ${cell({ attrs: `data-sets="${i}" style="padding-left:4px;padding-right:4px"`, main: esc(ex ? ex.name : 'Deleted exercise'), detail: plural(it.sets, 'set') })}
+      <button class="grip" aria-label="Drag to reorder">${ICON_GRIP}</button>
     </div>`;
   }).join('');
   app.innerHTML = `
     <header class="nav">${closeBtn('cancel')}<span class="spacer"></span><b class="title">${dr.id ? 'Edit Workout' : 'New Workout'}</b><span class="spacer"></span>${okBtn('saveW')}</header>
     <div class="group" style="margin-top:8px"><input class="field-input" id="wName" placeholder="Workout name, e.g. Push day" autocomplete="off" style="font-size:20px;font-weight:600"></div>
     <div class="section">Exercises</div>
-    <div class="group">${rows}<div class="cell-wrap"><button class="cell action" id="addToW">${plusLead}Add exercise</button></div></div>
+    <div class="group"><div id="wList">${rows}</div><div class="cell-wrap"><button class="cell action" id="addToW">${plusLead}Add exercise</button></div></div>
     <div class="err" id="wErr"></div>
     ${dr.id ? `<div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'delW' ? 'confirm' : ''}" id="delW">${state.pending === 'delW' ? 'Tap again to delete' : 'Delete Workout'}</button></div>` : ''}`;
   const name = $('wName');
@@ -906,6 +1070,7 @@ function renderWorkoutEdit() {
   $('addToW').onclick = () => openSheet({ type: 'addToWorkout', step: 'pick', q: '' });
   app.querySelectorAll('[data-sets]').forEach(b => b.onclick = () => openSheet({ type: 'setCount', index: Number(b.dataset.sets) }));
   app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { dr.items.splice(Number(b.dataset.rm), 1); render(); });
+  makeSortable($('wList'), (from, to) => { dr.items.splice(to, 0, dr.items.splice(from, 1)[0]); render(); });
   $('saveW').onclick = () => {
     const nm = dr.name.trim();
     if (!nm) { $('wErr').textContent = 'Give the workout a name.'; name.focus(); return; }
