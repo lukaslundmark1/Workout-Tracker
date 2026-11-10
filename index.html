@@ -370,6 +370,14 @@
   .tint-fill { height: 34px; padding: 0 14px; font-size: 15px; background: var(--tint); color: #fff; }
   .friend-head { display: flex; align-items: center; gap: 14px; margin: 4px 0 16px; }
   .stat-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stat-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .stat-row.three .stat { padding: 12px 14px; }
+  .stat-row.three .stat-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stat-row.three .stat-n { font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sec-link { display: flex; justify-content: space-between; align-items: baseline; }
+  .sec-link button { font-size: 17px; font-weight: 400; letter-spacing: 0; color: var(--tint); }
+  .me-cell .avatar { width: 52px; height: 52px; font-size: 22px; }
+  .me-cell .main > div:first-child { font-size: 19px; font-weight: 600; }
   .stat { background: var(--card); border-radius: var(--r); padding: 14px 16px; }
   .stat-n { font-family: var(--rounded); font-size: 30px; font-weight: 700; }
   .stat-l { font-size: 13px; color: var(--label2); }
@@ -547,7 +555,8 @@ const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList', friends:
 function render() {
   const VIEWS = { day: renderDay, log: renderLog, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
                   wList: renderWorkoutList, wEdit: renderWorkoutEdit, pView: renderPlanView, pEdit: renderPlanEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
-                  friends: renderFriends, friend: renderFriend, fEx: renderFriendExercise, settings: renderSettings };
+                  friends: renderFriends, friend: renderFriend, me: renderMe, pWorkouts: renderProfWorkouts, pWorkout: renderProfWorkout,
+                  pExercises: renderProfExercises, fEx: renderFriendExercise, settings: renderSettings };
   clearInterval(timerTick);
   app.ontouchstart = app.ontouchend = null;
   VIEWS[state.views[state.tab]]();
@@ -555,7 +564,7 @@ function render() {
   renderDock();
   renderSheet();
 }
-const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, fEx: 2 };
+const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pExercises: 2, pWorkout: 3, fEx: 4 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
 function ghost(onTop) {
@@ -1880,7 +1889,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.15';
+const APP_VERSION = '0.16';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2118,8 +2127,11 @@ const RULES_HELP = `<div class="group hero" style="text-align:left">
 function renderFriends() {
   const head = `<header class="nav"><span class="spacer"></span>${cloud.user ? `<button class="circle glass" id="addF" aria-label="Add friend">${svg('<path d="M12 5v14M5 12h14"/>', 20, 2.4)}</button>` : ''}</header>
     <div class="large-title">Friends</div>`;
+  const meCell = `<div class="group"><button class="cell me-cell" id="meCell"><span class="avatar">${esc(initialOf(myLabel()))}</span>
+    <span class="main"><div>${esc(myLabel())}</div><div class="sub">Your profile</div></span><span class="chev">${ICON_CHEV}</span></button></div>`;
+  const wireMe = () => { $('meCell').onclick = () => go('me', { prof: 'me' }); };
   if (!cloud.user) {
-    app.innerHTML = head + `
+    app.innerHTML = head + meCell + `
       <div class="group hero">
         <div class="hero-icon">${svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M16.5 14.6c2.4.2 4 1.7 4.5 4.4"/>', 40, 1.8)}</div>
         <h2>Train together</h2>
@@ -2127,15 +2139,16 @@ function renderFriends() {
       </div>
       <button class="primary" id="fSignIn">Sign in</button>`;
     $('fSignIn').onclick = () => openSheet({ type: 'signin' });
+    wireMe();
     return;
   }
-  if (friends.error === 'rules') { app.innerHTML = head + RULES_HELP; return; }
+  if (friends.error === 'rules') { app.innerHTML = head + meCell + RULES_HELP; wireMe(); return; }
   const me = cloud.user.uid;
   const incoming = friends.links.filter(l => l.status === 'pending' && l.from !== me);
   const outgoing = friends.links.filter(l => l.status === 'pending' && l.from === me);
   const accepted = friends.links.filter(l => l.status === 'accepted').sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
   const avatar = n => `<span class="avatar sm">${esc(initialOf(n))}</span>`;
-  app.innerHTML = head + `
+  app.innerHTML = head + meCell + `
     <div class="group code-card">
       <div class="lb-label">Your friend code</div>
       <div class="code">${data.settings.code ? esc(fmtCode(data.settings.code)) : '<span style="color:var(--label3)">······</span>'}</div>
@@ -2158,6 +2171,7 @@ function renderFriends() {
       <div class="set-row"><span class="main">${avatar(nameOf(l))}${esc(nameOf(l))}</span>
         <span style="display:flex;align-items:center;gap:8px"><span class="badge">Waiting</span><button class="circle" data-dec="${l.id}" aria-label="Cancel request" style="width:36px;height:36px;color:var(--label2)">${ICON_X}</button></span></div>`).join('')}</div>` : ''}`;
 
+  wireMe();
   $('addF').onclick = () => openSheet({ type: 'addFriend', code: '' });
   $('shareInv').onclick = async () => {
     const text = `Add me on Training tracker — my friend code is ${fmtCode(data.settings.code)}`;
@@ -2167,12 +2181,13 @@ function renderFriends() {
   $('copyCode').onclick = async () => { try { await navigator.clipboard.writeText(fmtCode(data.settings.code)); $('copyLbl').textContent = 'Copied'; setTimeout(() => { const c = $('copyLbl'); if (c) c.textContent = 'Copy code'; }, 1500); } catch (e) {} };
   app.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => openSheet({ type: 'acceptFriend', id: b.dataset.acc }));
   app.querySelectorAll('[data-dec]').forEach(b => b.onclick = () => { const l = friends.links.find(x => x.id === b.dataset.dec); if (l) removeLink(l).catch(e => { friends.error = e.code || e.message; render(); }); });
-  app.querySelectorAll('[data-friend]').forEach(b => b.onclick = () => go('friend', { friendLink: b.dataset.friend }));
+  app.querySelectorAll('[data-friend]').forEach(b => b.onclick = () => go('friend', { friendLink: b.dataset.friend, prof: b.dataset.friend }));
 }
 
 function renderFriend() {
   const l = friends.links.find(x => x.id === state.friendLink && x.status === 'accepted');
   if (!l) return go('friends');
+  state.prof = l.id;
   const me = cloud.user.uid, o = otherOf(l), name = nameOf(l);
   const theyShare = l.share && l.share[o], iShare = !!(l.share && l.share[me]);
   if (friends.cache[o] && Date.now() - friends.cache[o].at > 60 * 1000 && !state.friendLoading) delete friends.cache[o];
@@ -2181,31 +2196,7 @@ function renderFriend() {
   if (!theyShare) body = `<div class="group"><div class="empty">${esc(name)} isn't sharing their training with you.</div></div>`;
   else if (state.friendErr) body = `<div class="err">${esc(state.friendErr)}</div>`;
   else if (!c) body = `<div class="group"><div class="empty">Loading ${esc(name)}'s training…</div></div>`;
-  else {
-    const since30 = dk(addDays(new Date(), -30));
-    const sessionDates = Object.keys(c.days).filter(k => c.days[k].session && (c.days[k].session.end || k === todayKey()));
-    const dates = [...new Set([...c.sets.map(s => s.date), ...sessionDates])].sort().reverse();
-    const recent = dates.filter(d => d >= since30);
-    const exName = id => { const e = c.exercises.find(x => x.id === id); return e ? e.name : 'Exercise'; };
-    const usedEx = c.exercises.filter(e => c.sets.some(s => s.exId === e.id)).sort(byName);
-    body = `
-      <div class="stat-row"><div class="stat"><div class="stat-n">${recent.length}</div><div class="stat-l">workouts, last 30 days</div></div>
-        <div class="stat"><div class="stat-n">${c.sets.filter(s => s.date >= since30).length}</div><div class="stat-l">sets, last 30 days</div></div></div>
-      <div class="section">Recent workouts</div>
-      ${dates.length ? dates.slice(0, 12).map(k => {
-        const ss = c.sets.filter(s => s.date === k), d = c.days[k];
-        const byEx = [...new Set(ss.map(s => s.exId))];
-        const title = d && d.workouts && d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Custom workout';
-        const dur = d && d.session ? (d.session.end ? ` · ${fmtMins(d.session.end - d.session.start)}` : ' · <span style="color:var(--green)">in progress</span>') : '';
-        return `<div class="hcard"><div class="hcard-head"><b>${title}</b><span>${fmtDayYear(k)}${dur}</span></div>
-          ${byEx.length ? byEx.map(id => `<div class="hset"><span class="fx">${esc(exName(id))}</span><span class="v">${ss.filter(s => s.exId === id).sort((a, b) => a.slot - b.slot).map(s => `${W(s.weight)}×${s.reps}`).join(', ')}</span></div>`).join('')
-            : '<div class="hset"><span style="color:var(--label2)">No sets logged</span></div>'}</div>`;
-      }).join('') : `<div class="group"><div class="empty">No workouts in the last 4 months.</div></div>`}
-      ${usedEx.length ? `<div class="section">Exercises</div><div class="group">${usedEx.map(e => {
-        const best = Math.max(...c.sets.filter(s => s.exId === e.id).map(e1rm));
-        return cell({ attrs: `data-fex="${e.id}"`, main: esc(e.name), detail: `${fmtStat(toU(best), 'e1rm')} ${U()}` });
-      }).join('')}</div><div class="footnote">Best estimated 1RM in the last 4 months.</div>` : ''}`;
-  }
+  else body = profileBodyHTML(c, true);
   app.innerHTML = `
     <header class="nav">${backBtn('Friends')}<span class="spacer"></span>${theyShare ? `<button class="circle glass" id="fRefresh" aria-label="Refresh">${svg('<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>', 18, 2.2)}</button>` : ''}</header>
     <div class="friend-head"><span class="avatar">${esc(initialOf(name))}</span><div class="large-title" style="margin:0">${esc(name)}</div></div>
@@ -2222,7 +2213,7 @@ function renderFriend() {
     state.pending = null; removeLink(l).then(() => go('friends'));
   };
   if ($('fRefresh')) $('fRefresh').onclick = () => { delete friends.cache[o]; render(); };
-  app.querySelectorAll('[data-fex]').forEach(b => b.onclick = () => go('fEx', { friendEx: b.dataset.fex, stat: 'e1rm' }));
+  wireProfileBody();
   if (theyShare && !c && !state.friendLoading) {
     state.friendLoading = true; state.friendErr = '';
     loadFriend(o).then(() => { state.friendLoading = false; if (state.views.friends === 'friend') render(); })
@@ -2230,8 +2221,165 @@ function renderFriend() {
   }
 }
 
+/* ================= Profiles (yours and friends') =================
+   Same layout for both: stats, the last 3 workouts, the 5 most recently trained exercises.
+   "See all" opens the full lists; a workout opens its sets; an exercise opens its graph + history. */
+const myLabel = () => (data.settings.name || '').trim() || (cloud.user && (cloud.user.displayName || (cloud.user.email || '').split('@')[0])) || 'You';
+const profRoot = () => state.prof === 'me' ? 'me' : 'friend';
+// Where "back" (or pulling down) goes from a profile screen
+function backOf(v) {
+  if (v === 'pWorkouts' || v === 'pExercises') return profRoot();
+  if (v === 'pWorkout') return state.pwBack || profRoot();
+  if (v === 'fEx') return state.fExBack || profRoot();
+  return PULL_BACK[v];
+}
+// The training shown on the current profile: your own data, or the friend's cached copy
+function profSrc() {
+  if (state.prof === 'me') return { exercises: data.exercises, sets: data.sets, days: data.days, mine: true };
+  const l = friends.links.find(x => x.id === state.friendLink);
+  return l && friends.cache[otherOf(l)] ? friends.cache[otherOf(l)] : null;
+}
+const profName = () => { if (state.prof === 'me') return myLabel(); const l = friends.links.find(x => x.id === state.friendLink); return l ? nameOf(l) : 'Friend'; };
+// Days that count as a workout: sets logged, or a finished (or today's running) session
+function profDates(c) {
+  const tk = todayKey();
+  const sess = Object.keys(c.days).filter(k => k <= tk && c.days[k].session && (c.days[k].session.end || k === tk));
+  return [...new Set([...c.sets.map(s => s.date).filter(k => k <= tk), ...sess])].sort().reverse();
+}
+const relDay = k => {
+  const n = daysBetween(k, todayKey());
+  if (n === 0) return 'Today';
+  if (n === 1) return 'Yesterday';
+  return parse(k).getFullYear() === new Date().getFullYear() ? fmtShort(k) : fmtDayYear(k);
+};
+const setTxt = s => s.weight > 0 ? `${W(s.weight)} ${U()} × ${s.reps}` : `${s.reps} reps`;
+const workoutTitle = (c, k) => { const d = c.days[k]; return d && d.workouts && d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Custom workout'; };
+function workoutRowHTML(c, k) {
+  const ss = c.sets.filter(s => s.date === k), d = c.days[k];
+  const nEx = new Set(ss.map(s => s.exId)).size;
+  const bits = [relDay(k)];
+  if (nEx) bits.push(plural(nEx, 'exercise'), plural(ss.length, 'set')); else bits.push('No sets logged');
+  if (d && d.session) bits.push(d.session.end ? fmtMins(d.session.end - d.session.start) : '<span style="color:var(--green)">in progress</span>');
+  return cell({ attrs: `data-pw="${k}"`, main: workoutTitle(c, k), sub: bits.join(' · ') });
+}
+// Exercises ordered by when they were last trained, with the best set (highest estimated 1RM) from that day
+function recentExercises(c) {
+  const last = {};
+  for (const s of c.sets) if (!last[s.exId] || s.date > last[s.exId]) last[s.exId] = s.date;
+  return c.exercises.filter(e => last[e.id]).map(e => {
+    const day = last[e.id];
+    const best = c.sets.filter(s => s.exId === e.id && s.date === day).reduce((a, b) => (e1rm(b) > e1rm(a) ? b : a));
+    return { ex: e, day, best };
+  }).sort((a, b) => (a.day === b.day ? a.ex.name.localeCompare(b.ex.name) : a.day < b.day ? 1 : -1));
+}
+const exRowHTML = r => cell({ attrs: `data-pe="${r.ex.id}"`, main: esc(r.ex.name), sub: relDay(r.day), detail: setTxt(r.best) });
+function lastTrainedLabel(k) {
+  if (!k) return '–';
+  const n = daysBetween(k, todayKey());
+  return n === 0 ? 'Today' : n === 1 ? 'Yesterday' : n < 7 ? `${n} days` : parse(k).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+function profileBodyHTML(c, isFriend) {
+  const dates = profDates(c), since30 = dk(addDays(new Date(), -30)), wk = dk(startOfWeek(new Date()));
+  const exs = recentExercises(c);
+  return `
+    <div class="stat-row three">
+      <div class="stat"><div class="stat-n">${dates.filter(d => d >= since30).length}</div><div class="stat-l">in 30 days</div></div>
+      <div class="stat"><div class="stat-n">${dates.filter(d => d >= wk).length}</div><div class="stat-l">this week</div></div>
+      <div class="stat"><div class="stat-n">${lastTrainedLabel(dates[0])}</div><div class="stat-l">last workout</div></div>
+    </div>
+    <div class="section sec-link"><span>Recent workouts</span>${dates.length > 3 ? '<button id="seeW">See all</button>' : ''}</div>
+    ${dates.length ? `<div class="group">${dates.slice(0, 3).map(k => workoutRowHTML(c, k)).join('')}</div>`
+      : `<div class="group"><div class="empty">${isFriend ? 'No workouts in the last 4 months.' : 'No workouts logged yet.'}</div></div>`}
+    ${exs.length ? `<div class="section sec-link"><span>Exercises</span>${exs.length > 5 ? `<button id="seeE">See all ${exs.length}</button>` : ''}</div>
+      <div class="group">${exs.slice(0, 5).map(exRowHTML).join('')}</div>
+      <div class="footnote">Most recently trained, with the best set from that day.</div>` : ''}`;
+}
+// Taps inside a profile body, a workout page or the full lists
+function wireProfileBody(from) {
+  const here = state.views[state.tab];
+  if ($('seeW')) $('seeW').onclick = () => go('pWorkouts');
+  if ($('seeE')) $('seeE').onclick = () => go('pExercises');
+  app.querySelectorAll('[data-pw]').forEach(b => b.onclick = () => go('pWorkout', { pwDate: b.dataset.pw, pwBack: here }));
+  app.querySelectorAll('[data-pe]').forEach(b => b.onclick = () => go('fEx', { friendEx: b.dataset.pe, fExBack: here, stat: 'e1rm' }));
+}
+
+function renderMe() {
+  state.prof = 'me';
+  const c = profSrc();
+  app.innerHTML = `
+    <header class="nav">${backBtn('Friends')}</header>
+    <div class="friend-head"><span class="avatar">${esc(initialOf(myLabel()))}</span><div class="large-title" style="margin:0">${esc(myLabel())}</div></div>
+    ${profileBodyHTML(c, false)}
+    <div class="footnote" style="margin-top:22px">${cloud.user ? 'This is what friends you share with see. ' : ''}Change your name in Settings.</div>`;
+  $('back').onclick = () => go('friends');
+  wireProfileBody();
+}
+
+function profHeader(title) {
+  return `<header class="nav">${backBtn('Back')}</header>
+    <div class="eyebrow">${esc(profName())}</div>
+    <div class="large-title">${title}</div>`;
+}
+function renderProfWorkouts() {
+  const c = profSrc(); if (!c) return go(profRoot());
+  const dates = profDates(c);
+  const months = [];
+  for (const k of dates) { const m = k.slice(0, 7); if (!months.length || months[months.length - 1].m !== m) months.push({ m, ks: [] }); months[months.length - 1].ks.push(k); }
+  app.innerHTML = profHeader('Workouts') + months.map(({ m, ks }) => `
+    <div class="section">${parse(m + '-01').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</div>
+    <div class="group">${ks.map(k => workoutRowHTML(c, k)).join('')}</div>`).join('')
+    + (c.mine ? '' : '<div class="footnote">The last 4 months.</div>');
+  $('back').onclick = () => go(backOf('pWorkouts'));
+  wireProfileBody();
+}
+function renderProfWorkout() {
+  const c = profSrc(); if (!c) return go(profRoot());
+  const k = state.pwDate, d = c.days[k], ss = c.sets.filter(s => s.date === k);
+  const exIds = [...new Set(ss.slice().sort((a, b) => a.ts - b.ts).map(s => s.exId))];
+  const exName = id => { const e = c.exercises.find(x => x.id === id); return e ? e.name : 'Exercise'; };
+  const dur = d && d.session ? (d.session.end ? ` · ${fmtMins(d.session.end - d.session.start)}` : ' · in progress') : '';
+  app.innerHTML = `
+    <header class="nav">${backBtn('Back')}</header>
+    <div class="eyebrow">${esc(profName())} · ${fmtLong(k)}${dur}</div>
+    <div class="large-title">${workoutTitle(c, k)}</div>
+    ${exIds.length ? `<div class="group">${exIds.map(id => cell({ attrs: `data-pe="${id}"`, main: esc(exName(id)),
+        sub: ss.filter(s => s.exId === id).sort((a, b) => a.slot - b.slot).map(setTxt).join(' · ') })).join('')}</div>
+      <div class="footnote">${plural(ss.length, 'set')} logged. Tap an exercise to see its progress.</div>`
+      : '<div class="group"><div class="empty">No sets logged.</div></div>'}`;
+  $('back').onclick = () => go(backOf('pWorkout'));
+  wireProfileBody();
+}
+function renderProfExercises() {
+  const c = profSrc(); if (!c) return go(profRoot());
+  const all = recentExercises(c);
+  app.innerHTML = profHeader('Exercises') + searchHTML('pq', 'Search exercises') + '<div id="pRes"></div>'
+    + '<div class="footnote">Most recently trained first, with the best set from that day.</div>';
+  const draw = () => {
+    const q = $('pq').value.trim().toLowerCase();
+    const list = all.filter(r => r.ex.name.toLowerCase().includes(q));
+    $('pRes').innerHTML = list.length ? `<div class="group">${list.map(exRowHTML).join('')}</div>` : '<div class="group"><div class="empty">No matches.</div></div>';
+    wireProfileBody();
+  };
+  $('pq').oninput = draw;
+  draw();
+  $('back').onclick = () => go(backOf('pExercises'));
+}
+
 // A friend's exercise: same graph and history as your own, read-only
 function renderFriendExercise() {
+  if (state.prof === 'me') {
+    const ex = data.exercises.find(e => e.id === state.friendEx);
+    if (!ex) return go('me');
+    state.statSrc = null;
+    app.innerHTML = `
+      <header class="nav">${backBtn('Back')}</header>
+      <div class="eyebrow">${esc(myLabel())}</div>
+      <div class="large-title">${esc(ex.name)}</div>
+      ${progressHTML(ex.id) + historyHTML(ex.id)}`;
+    $('back').onclick = () => go(backOf('fEx'));
+    wireProgress(ex.id);
+    return;
+  }
   const l = friends.links.find(x => x.id === state.friendLink);
   if (!l) return go('friends');
   const o = otherOf(l), c = friends.cache[o];
@@ -2239,11 +2387,11 @@ function renderFriendExercise() {
   if (!ex) return go('friend');
   const key = o + '|' + ex.id, cached = friends.exCache[key];
   app.innerHTML = `
-    <header class="nav">${backBtn(nameOf(l))}</header>
+    <header class="nav">${backBtn('Back')}</header>
     <div class="eyebrow">${esc(nameOf(l))}</div>
     <div class="large-title">${esc(ex.name)}</div>
     ${cached ? (state.statSrc = cached.sets, progressHTML(ex.id) + historyHTML(ex.id)) : '<div class="group"><div class="empty">Loading…</div></div>'}`;
-  $('back').onclick = () => go('friend');
+  $('back').onclick = () => go(backOf('fEx'));
   if (cached) { wireProgress(ex.id); state.statSrc = null; }
   else loadFriendExercise(o, ex.id).then(() => { if (state.views.friends === 'fEx') render(); }).catch(() => {});
 }
@@ -2307,7 +2455,8 @@ function sheetAcceptFriend(el) {
 /* ================= Swipe down to close ================= */
 // Pull a slid-up screen (or a sheet) down from the top to close it. It follows your finger,
 // the screen underneath grows back into place, and letting go early springs it back.
-const PULL_BACK = { log: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList', friend: 'friends', fEx: 'friend' };
+const PULL_BACK = { log: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList', friend: 'friends', me: 'friends',
+                    pWorkouts: 1, pExercises: 1, pWorkout: 1, fEx: 1 };   // 1 = depends on where you came from (backOf)
 (function pullToClose() {
   let p = null;
   const ease = '.32s cubic-bezier(.2,.85,.3,1)';
@@ -2319,7 +2468,7 @@ const PULL_BACK = { log: 'day', picker: 'day', calendar: 'day', history: 'log', 
     const base = { x: touch.clientX, y: touch.clientY, axis: null, dy: 0, ly: touch.clientY, lt: performance.now(), v: 0 };
     const sheetEl = t.closest('.sheet');
     if (sheetEl) { if (sheetEl.scrollTop <= 0) p = { ...base, kind: 'sheet', el: sheetEl }; return; }
-    if (state.sheet || !PULL_BACK[state.views[state.tab]] || window.scrollY > 0) return;
+    if (state.sheet || !backOf(state.views[state.tab]) || window.scrollY > 0) return;
     p = { ...base, kind: 'screen' };
   }, { passive: true });
 
@@ -2353,7 +2502,7 @@ const PULL_BACK = { log: 'day', picker: 'day', calendar: 'day', history: 'log', 
     p.saved = { views: { ...state.views }, logExId: state.logExId, detailExId: state.detailExId };
     p.layer = ghost(true);
     p.layer.style.transition = 'none';
-    state.views[state.tab] = PULL_BACK[state.views[state.tab]];
+    state.views[state.tab] = backOf(state.views[state.tab]);
     state.pending = null;
     render();
     app.classList.remove('enter-up', 'under');
