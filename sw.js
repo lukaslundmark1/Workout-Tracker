@@ -1,12 +1,12 @@
 // Bump this when you deploy a new version so old caches are cleared.
-const CACHE = 'tt-v3';
+const CACHE = 'tt-v5';
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/apple-touch-icon.png',
+  './icon-192.png',
+  './icon-512.png',
+  './apple-touch-icon.png',
 ];
 
 self.addEventListener('install', e => {

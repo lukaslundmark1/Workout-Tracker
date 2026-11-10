@@ -2,7 +2,7 @@
 
 ## Put it online (GitHub Pages, free)
 1. Create a new public repository on github.com, e.g. `training-tracker`.
-2. Upload every file in this folder (keep the `icons` folder) to the repository.
+2. Upload every file in this folder to the repository.
 3. Go to the repository's **Settings → Pages**, set **Source** to *Deploy from a branch*, pick `main` and `/ (root)`, then save.
 4. After a minute your app is at `https://<your-username>.github.io/training-tracker/`.
 
