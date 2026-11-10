@@ -324,8 +324,6 @@
 
   /* End-of-workout page */
   .finish { display: flex; flex-direction: column; align-items: stretch; padding-top: 8vh; }
-  .finish-icon { width: 88px; height: 88px; border-radius: 50%; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center; background: var(--fill); color: var(--label3); }
-  .finish-icon.done { background: var(--green); color: #fff; }
   .finish-sub { text-align: center; color: var(--label2); font-size: 15px; margin-bottom: 14px; }
   .wheels.dur { justify-content: center; }
   .wheels.dur .wheel { flex: 0 0 72px; }
@@ -411,7 +409,6 @@
   .stat { background: var(--card); border-radius: var(--r); padding: 14px 16px; }
   .stat-n { font-family: var(--rounded); font-size: 30px; font-weight: 700; }
   .stat-l { font-size: 13px; color: var(--label2); }
-  .hset .fx { flex: 0 0 44%; color: var(--label2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
   .tab-badge { position: absolute; top: 4px; left: 50%; margin-left: 6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; }
   #dock button { position: relative; }
   .switch { -webkit-appearance: none; appearance: none; width: 51px; height: 31px; border-radius: 16px; background: var(--fill2); position: relative; flex: none; transition: background .3s ease; cursor: pointer; margin: 0; }
@@ -437,7 +434,6 @@
   #dock button { position: relative; z-index: 1; transition: transform .45s var(--bounce), color .3s; }
   #dock button:active { transform: scale(.9); transition: transform .12s ease-out; }
   /* Tab bar: the selection slides between tabs */
-  #dock { position: fixed; }
   #dock.has-ind button.on { background: transparent; }
   .dock-ind { position: absolute; top: 5px; bottom: 5px; left: 0; border-radius: 27px; background: var(--fill); z-index: 0; transition: transform .55s cubic-bezier(.3,1.3,.5,1), width .55s cubic-bezier(.3,1.3,.5,1); }
 
@@ -766,7 +762,8 @@ function initWheel(id, index) {
   let raf = 0, lastI = -1;
   const mark = () => {
     raf = 0;
-    const i = wheelIndex(id), mid = sc.scrollTop + sc.clientHeight / 2;
+    if (!sc.isConnected) return;
+    const i = Math.max(0, Math.min(opts.length - 1, Math.round(sc.scrollTop / ITEM))), mid = sc.scrollTop + sc.clientHeight / 2;
     if (i !== lastI) { opts.forEach((o, j) => o.classList.toggle('on', i === j)); lastI = i; }
     if (opts.length < 2) return;
     for (const o of opts) {
@@ -855,13 +852,14 @@ function weekLabel(ws, short) {
 }
 
 // A day whose exercises were all removed starts over: no workout name, no timer/finished state.
-// A planned day from today on becomes an extra rest day, so the plan moves along instead of filling it in again.
-function clearEmptyDay(k) {
+// If YOU emptied a planned day (trash), it becomes a moved rest day so the plan moves along, like "Move back a day"
+// with "Just this workout". Otherwise (e.g. an exercise was deleted) the stored copy goes and the plan shows the day again.
+function clearEmptyDay(k, byUser) {
   const d = data.days[k]; if (!d) return;
   d.workouts = [];
   if (!data.sets.some(s => s.date === k)) delete d.session;
   if (d.session) return;
-  if ((d.plan || d.rest) && k >= todayKey() && activePlan()) data.days[k] = { items: [], workouts: [], rest: true, absorb: 'next' };  // like "move back a day": it takes the next rest day
+  if (byUser && d.plan && !d.pinned && k >= todayKey() && activePlan()) data.days[k] = { items: [], workouts: [], rest: true, absorb: 'next' };
   else delete data.days[k];
 }
 
@@ -928,7 +926,7 @@ function renderDay() {
     return `
     <div class="day-title">${fmtLong(k)}</div>
     <div class="day-sub">${day.items.length && day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : day.items.length ? 'Custom workout'
-      : pd && pd.extra ? 'Rest day (moved)' : pd ? 'Rest day' : k < tk ? 'Nothing logged' : 'No workout planned'}${day.items.length && k < tk && !logged.has(k) && !day.session ? ' · not trained' : ''}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ''}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
+      : pd && pd.extra ? 'Rest day (moved)' : pd && pd.workout ? `${esc(pd.workout.name)} (no exercises yet)` : pd ? 'Rest day' : k < tk ? 'Nothing logged' : 'No workout planned'}${day.items.length && k < tk && !logged.has(k) && !day.session ? ' · not trained' : ''}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ''}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
     ${isFinished(k) && data.sets.some(x => x.date === k) ? `<button class="capsule glass move-btn" id="sumBtn">${svg('<path d="M5 19V11M12 19V5M19 19v-6"/>', 16, 2.4)} Workout summary</button>` : ''}
     ${nx ? `<button class="capsule glass move-btn" id="pullNext">${svg('<path d="M7 5l11 7-11 7z"/>', 15, 2.2)} Do ${esc(nx.workout.name)} today</button>` : ''}
     ${canDoToday(k) ? `<button class="capsule glass move-btn" id="doToday">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16, 2.4)} Do it today</button>` : ''}
@@ -939,9 +937,7 @@ function renderDay() {
     ${day.items.length && canFinish(k) ? `<button class="primary" id="finishDay">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
     <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
   };
-  const k = state.selected, st = data.days[k];
-  const day = dayOf(k), pd = planDayFor(k);
-  const untouched = !logged.has(k) && !day.session;
+  const k = state.selected;
 
   app.innerHTML = `
     <header class="weekhead">
@@ -980,7 +976,7 @@ function renderDay() {
     data.sets = data.sets.filter(x => !(x.exId === exId && x.date === k));
     delete state.drafts[exId + '|' + k];
     if (rest && rest.date === k && rest.exId === exId) stopRest();
-    if (!d.items.length) clearEmptyDay(k);
+    if (!d.items.length) clearEmptyDay(k, true);
     save(); state.pending = null; render();
   });
   if ($('dayList')) makeSortable($('dayList'), (from, to) => {
@@ -1170,7 +1166,6 @@ function renderLog() {
         if (setsLeft(k) === 0 && !newPR) toast(`<span class="tic" style="background:var(--green-soft);color:var(--green)">${ICON_OK}</span><span>All planned sets done<small>Finish the workout when you're ready</small></span>`);
       }
       changed();
-      state.justTicked = null;
     };
   });
 }
@@ -1575,11 +1570,20 @@ function wireProgress(exId) {
 function historyHTML(exId) {
   const src = state.statSrc || data.sets;
   const setsFor = (id, k) => src.filter(s => s.exId === id && s.date === k).sort((a, b) => a.slot - b.slot || a.ts - b.ts);
-  const dates = [...new Set(src.filter(s => s.exId === exId).map(s => s.date))].sort().reverse();
+  const mine = src.filter(s => s.exId === exId);
+  const dates = [...new Set(mine.map(s => s.date))].sort();
+  // Each day's PR set (best estimated 1RM beating every earlier day), worked out oldest → newest in one pass
+  const prSet = {}; let runBest = null;
+  for (const k of dates) {
+    const ss = mine.filter(s => s.date === k), top = ss.reduce((a, b) => (e1rm(b) > e1rm(a) ? b : a));
+    if (runBest !== null && e1rm(top) > runBest + 1e-6) prSet[k] = top.id;
+    runBest = Math.max(runBest || 0, e1rm(top));
+  }
+  dates.reverse();
   return `<div class="section">History</div>` + (dates.length ? dates.map(k => {
     const ss = setsFor(exId, k);
     const best = Math.max(...ss.map(e1rm));
-    const pr = prFor(exId, k, src);
+    const pr = prSet[k] ? { set: { id: prSet[k] } } : null;
     return `<div class="hcard"><div class="hcard-head"><b>${fmtDayYear(k)}</b><span>e1RM ${fmtStat(toU(best), 'e1rm')} ${U()}</span></div>
       ${ss.map((s, i) => `<div class="hset"><span class="n">${i + 1}</span><span class="v">${W(s.weight)} ${U()} × ${s.reps}${pr && pr.set.id === s.id ? '<span class="pr-badge">PR</span>' : ''}</span></div>`).join('')}</div>`;
   }).join('') : '<div class="group"><div class="empty">No sets logged yet.</div></div>');
@@ -2361,7 +2365,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.21.1';
+const APP_VERSION = '0.21.2';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -3119,10 +3123,14 @@ function renderSheet() {
     // The sheet slides away instead of vanishing (unless it was already pulled down by hand)
     const sh = el.querySelector('.sheet');
     if (!el.hidden && sh && !sh.style.transform && !reduceMotion()) {
-      const g = document.createElement('div'); g.className = 'sheet-ghost'; g.setAttribute('aria-hidden', 'true');
-      g.innerHTML = el.innerHTML; g.querySelectorAll('[id]').forEach(x => x.removeAttribute('id'));
-      const gs = g.querySelector('.sheet'); if (gs) gs.scrollTop = sh.scrollTop;
-      document.body.appendChild(g); setTimeout(() => g.remove(), 380);
+      const g = document.createElement('div'); g.className = 'sheet-ghost'; g.setAttribute('aria-hidden', 'true'); g.inert = true;
+      const top = sh.scrollTop, wheels = [...el.querySelectorAll('.wheel-scroll')].map(w => w.scrollTop);
+      while (el.firstChild) g.appendChild(el.firstChild);              // the real nodes, so nothing visibly resets
+      g.querySelectorAll('[id]').forEach(x => x.removeAttribute('id'));
+      document.body.appendChild(g);
+      const gs = g.querySelector('.sheet'); if (gs) gs.scrollTop = top;
+      g.querySelectorAll('.wheel-scroll').forEach((w, i) => { w.scrollTop = wheels[i]; });
+      setTimeout(() => g.remove(), 380);
     }
     el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); return;
   }
@@ -3226,9 +3234,11 @@ function sheetExForm(el) {
     data.workouts.forEach(w => { w.items = w.items.filter(i => i.exId !== ex.id); });
     for (const k in data.days) {
       const d = data.days[k];
+      if (!d.items.some(i => i.exId === ex.id)) continue;      // only days that had this exercise
       d.items = d.items.filter(i => i.exId !== ex.id);
       if (!d.items.length) clearEmptyDay(k);
     }
+    if (rest && rest.exId === ex.id) stopRest();
     if (state.draft) state.draft.items = state.draft.items.filter(i => i.exId !== ex.id);
     save(); state.sheet = null; go('eList');
   };

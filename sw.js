@@ -1,5 +1,5 @@
 // Bump this when you deploy a new version so old caches are cleared.
-const CACHE = 'tt-v26';
+const CACHE = 'tt-v27';
 const ASSETS = [
   './',
   './index.html',
