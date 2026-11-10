@@ -4,13 +4,13 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function me() { return request.auth.uid; }
     function pair(x, y) { return x < y ? x + '_' + y : y + '_' + x; }
-    // True if `owner` has accepted you as a friend and switched on "Share my training"
     function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(me())); }
     function validLib(d) {
       return d.by == me() && d.name is string && d.name.size() > 0 && d.name.size() <= 60
         && d.muscle is string && d.muscle.size() <= 20 && d.equip is string && d.equip.size() <= 20
         && d.byName is string && d.byName.size() <= 60;
     }
+    // True if `owner` has accepted you as a friend and switched on "Share my training"
     function sharesWith(owner) {
       let path = /databases/$(database)/documents/links/$(pair(owner, me()));
       return exists(path) && get(path).data.status == 'accepted' && get(path).data.share[owner] == true;
