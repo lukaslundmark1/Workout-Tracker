@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -10,8 +10,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Training">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f2f7" id="themeColor">
 <style>
   :root {
     color-scheme: light dark;
@@ -22,18 +21,29 @@
     --glass: rgba(255,255,255,.72); --glass-edge: rgba(255,255,255,.9);
     --glass-shadow: 0 10px 30px rgba(0,0,0,.10), 0 2px 6px rgba(0,0,0,.06);
     --backdrop: rgba(0,0,0,.25);
-    --r: 22px;
+    --r: 22px; --sheet-bg: var(--bg); --sheet-card: var(--card);
     --rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
       --bg: #000; --card: #1c1c1e; --card2: #2c2c2e; --label: #fff; --label2: rgba(235,235,245,.6); --label3: rgba(235,235,245,.3);
       --sep: rgba(84,84,88,.55); --fill: rgba(118,118,128,.24); --fill2: rgba(118,118,128,.32); --pressed: rgba(255,255,255,.06);
       --tint: #0a84ff; --tint-soft: rgba(10,132,255,.2); --red: #ff453a; --red-soft: rgba(255,69,58,.2); --green: #30d158; --green-soft: rgba(48,209,88,.16);
       --seg-on: #636366; --fill-faint: rgba(118,118,128,.12); --grid: rgba(235,235,245,.12);
       --glass: rgba(37,37,40,.68); --glass-edge: rgba(255,255,255,.12);
       --glass-shadow: 0 10px 30px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);
-      --backdrop: rgba(0,0,0,.5);
+      --backdrop: rgba(0,0,0,.5); --sheet-bg: #1c1c1e; --sheet-card: #2c2c2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root[data-theme="system"] {
+      --bg: #000; --card: #1c1c1e; --card2: #2c2c2e; --label: #fff; --label2: rgba(235,235,245,.6); --label3: rgba(235,235,245,.3);
+      --sep: rgba(84,84,88,.55); --fill: rgba(118,118,128,.24); --fill2: rgba(118,118,128,.32); --pressed: rgba(255,255,255,.06);
+      --tint: #0a84ff; --tint-soft: rgba(10,132,255,.2); --red: #ff453a; --red-soft: rgba(255,69,58,.2); --green: #30d158; --green-soft: rgba(48,209,88,.16);
+      --seg-on: #636366; --fill-faint: rgba(118,118,128,.12); --grid: rgba(235,235,245,.12);
+      --glass: rgba(37,37,40,.68); --glass-edge: rgba(255,255,255,.12);
+      --glass-shadow: 0 10px 30px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);
+      --backdrop: rgba(0,0,0,.5); --sheet-bg: #1c1c1e; --sheet-card: #2c2c2e;
     }
   }
   * { box-sizing: border-box; }
@@ -190,6 +200,7 @@
   .video { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden; }
   .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
   a { color: var(--tint); text-decoration: none; }
+  a.cell:not(.action) { color: var(--label); }
 
   /* History day cards */
   .hcard { background: var(--card); border-radius: var(--r); overflow: hidden; margin-bottom: 14px; padding-bottom: 6px; }
@@ -208,11 +219,11 @@
   .sheet {
     position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 21; max-width: 584px; margin: 0 auto;
     max-height: calc(100% - 56px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; -webkit-overflow-scrolling: touch;
-    background: var(--bg); border-radius: 34px; padding: 0 14px 18px;
+    border-radius: 34px; padding: 0 14px 18px;
     box-shadow: 0 20px 60px rgba(0,0,0,.25);
     animation: up .38s cubic-bezier(.2,.9,.25,1);
   }
-  @media (prefers-color-scheme: dark) { .sheet { background: #1c1c1e; } .sheet .group, .sheet .search { background: #2c2c2e; } }
+  .sheet { background: var(--sheet-bg); } .sheet .group { background: var(--sheet-card); }
   @keyframes up { from { transform: translateY(110%); } }
   @keyframes fade { from { opacity: 0; } }
   .sheet-head { position: sticky; top: 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; height: 68px; z-index: 1; background: inherit; }
@@ -308,10 +319,30 @@
   @keyframes pulse { 50% { opacity: .3; } }
   .timer.ended { color: var(--green); }
 
+  /* Settings */
+  .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 8px 12px 8px 18px; position: relative; }
+  .set-row + .set-row::before, .cell + .set-row::before, .set-row + .cell::before { content: ""; position: absolute; top: 0; left: 18px; right: 18px; border-top: .5px solid var(--sep); }
+  .set-row .lbl { font-weight: 500; }
+  .seg.sm { margin: 0; flex: none; }
+  .seg.sm button { flex: none; height: 32px; padding: 0 12px; font-size: 13px; }
+  .mini-stepper { display: flex; align-items: center; background: var(--fill); border-radius: 18px; height: 34px; }
+  .mini-stepper button { width: 38px; height: 34px; font-size: 19px; display: flex; align-items: center; justify-content: center; }
+  .mini-stepper button:disabled { color: var(--label3); }
+  .mini-stepper span { min-width: 26px; text-align: center; font-family: var(--rounded); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .profile { display: flex; align-items: center; gap: 14px; padding: 14px 18px; }
+  .avatar { width: 52px; height: 52px; border-radius: 50%; background: linear-gradient(135deg, #5ac8fa, #007aff); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; flex: none; font-family: var(--rounded); }
+  .profile input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font-size: 20px; font-weight: 600; padding: 6px 0; }
+  .profile input::placeholder { color: var(--label3); }
+  .badge { font-size: 12px; font-weight: 600; color: var(--label2); background: var(--fill); border-radius: 10px; padding: 3px 8px; }
+  .hero { text-align: center; padding: 28px 22px 24px; }
+  .hero-icon { width: 76px; height: 76px; border-radius: 24px; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; color: #fff; background: linear-gradient(135deg, #34c759, #30b0c7); }
+  .hero h2 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.02em; }
+  .hero p { color: var(--label2); margin: 0; line-height: 1.4; font-size: 15px; }
+
   /* Floating tab bar */
   #dock {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 10;
-    width: min(calc(100% - 40px), 380px); height: 64px; border-radius: 32px; padding: 5px;
+    width: min(calc(100% - 28px), 440px); height: 64px; border-radius: 32px; padding: 5px;
     display: flex; align-items: stretch; gap: 2px;
   }
   #dock button { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font-size: 10px; font-weight: 600; color: var(--label); border-radius: 27px; transition: background .25s, color .25s; }
@@ -354,6 +385,7 @@ function migrate(d) {
     let i = 0;
     g.sort((a, b) => a.ts - b.ts).forEach(s => { while (taken.has(i)) i++; s.slot = i++; });
   });
+  d.settings = Object.assign({ units: 'metric', theme: 'system', weekStart: 1, defaultSets: 3, name: '' }, d.settings || {});
   d.version = 3;
   return d;
 }
@@ -371,9 +403,9 @@ const pad = n => String(n).padStart(2, '0');
 const dk = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parse = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-const startOfWeek = d => addDays(d, -((d.getDay() + 6) % 7)); // Monday
+const startOfWeek = d => addDays(d, -((d.getDay() - data.settings.weekStart + 7) % 7)); // Monday or Sunday, per Settings
 const todayKey = () => dk(new Date());
-const WD = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const wd = () => data.settings.weekStart === 0 ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const fmtLong = k => parse(k).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 const fmtShort = k => parse(k).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 const fmtTiny = k => parse(k).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
@@ -395,6 +427,13 @@ function ytId(url) {
   const m = String(url).match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([\w-]{11})/);
   return m ? m[1] : null;
 }
+/* Units: weights are always stored in kg; shown and typed in the unit chosen in Settings */
+const LB = 2.20462262;
+const isImp = () => data.settings.units === 'imperial';
+const U = () => isImp() ? 'lb' : 'kg';
+const toU = kg => isImp() ? kg * LB : kg;
+const fromU = v => isImp() ? v / LB : v;
+const W = kg => isImp() ? String(Math.round(kg * LB * 10) / 10) : fmtW(kg);
 const parseW = v => { const n = parseFloat(String(v).replace(',', '.')); return n >= 0 ? n : NaN; };
 const parseR = v => { const n = parseInt(v, 10); return n > 0 ? n : NaN; };
 
@@ -414,6 +453,8 @@ const ICON_SEARCH = svg('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>
 const ICON_CHECK = svg('<path d="M6 12.5l4 4 8-9"/>', 18, 3);
 const ICON_TODAY = svg('<rect x="3.5" y="4.5" width="17" height="16" rx="3"/><path d="M3.5 9.5h17M8 2.5v4M16 2.5v4"/><circle cx="12" cy="15" r="1.6" fill="currentColor"/>', 26, 1.7);
 const ICON_WORKOUTS = svg('<rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/>', 26, 1.7);
+const ICON_FRIENDS = svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M16.5 14.6c2.4.2 4 1.7 4.5 4.4"/>', 26, 1.7);
+const ICON_SETTINGS = svg('<circle cx="12" cy="12" r="3"/><path d="M12 2.8l1.6 2.3 2.8-.4.9 2.7 2.5 1.3-.6 2.7 1.6 2.3-2.1 1.9.1 2.8-2.7.6-1.2 2.5-2.6-1-2.6 1-1.2-2.5-2.7-.6.1-2.8-2.1-1.9 1.6-2.3-.6-2.7 2.5-1.3.9-2.7 2.8.4z"/>', 26, 1.6);
 const ICON_EXERCISES = svg('<path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>', 26, 1.9);
 const ICON_X = svg('<path d="M6 6l12 12M18 6L6 18"/>', 18, 2.4);
 const ICON_OK = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 20, 2.6);
@@ -433,7 +474,7 @@ const ICON_TIMER = svg('<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.
 /* ================= State & routing ================= */
 const state = {
   tab: 'today',
-  views: { today: 'day', workouts: 'wList', exercises: 'eList' },
+  views: { today: 'day', workouts: 'wList', exercises: 'eList', friends: 'friends', settings: 'settings' },
   selected: todayKey(),
   weekStart: startOfWeek(new Date()),
   logExId: null,
@@ -449,11 +490,12 @@ const state = {
   drafts: {},         // unsaved values typed into set rows: { 'exId|date': { slot: {w, r} } }
 };
 const app = $('app');
-const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList' };
+const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList', friends: 'friends', settings: 'settings' };
 
 function render() {
   const VIEWS = { day: renderDay, log: renderLog, finish: renderFinish, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
-                  wList: renderWorkoutList, wEdit: renderWorkoutEdit, eList: renderExerciseList, eDetail: renderExerciseDetail };
+                  wList: renderWorkoutList, wEdit: renderWorkoutEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
+                  friends: renderFriends, settings: renderSettings };
   clearInterval(timerTick);
   app.ontouchstart = app.ontouchend = null;
   VIEWS[state.views[state.tab]]();
@@ -461,7 +503,7 @@ function render() {
   renderDock();
   renderSheet();
 }
-const DEPTH = { day: 0, wList: 0, eList: 0, log: 1, finish: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, history: 2 };
+const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, finish: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, history: 2 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
 function ghost(onTop) {
@@ -495,7 +537,8 @@ function go(view, extra = {}) {
 
 /* ================= Tab bar ================= */
 function renderDock() {
-  const tabs = [['today', 'Today', ICON_TODAY], ['workouts', 'Workouts', ICON_WORKOUTS], ['exercises', 'Exercises', ICON_EXERCISES]];
+  // Today stays in the middle
+  const tabs = [['friends', 'Friends', ICON_FRIENDS], ['workouts', 'Workouts', ICON_WORKOUTS], ['today', 'Today', ICON_TODAY], ['exercises', 'Exercises', ICON_EXERCISES], ['settings', 'Settings', ICON_SETTINGS]];
   const dock = $('dock');
   dock.innerHTML = tabs.map(([t, label, icon]) => `<button data-tab="${t}" class="${state.tab === t ? 'on' : ''}">${icon}<span>${label}</span></button>`).join('');
   dock.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
@@ -594,7 +637,7 @@ function renderDay() {
   const weekHTML = ws => `<div class="week">${Array.from({ length: 7 }, (_, i) => {
     const k = dk(addDays(ws, i));
     const cls = ['day', k === tk && 'today', k === state.selected && 'sel'].filter(Boolean).join(' ');
-    return `<button class="${cls}" data-k="${k}"><span class="wd">${WD[i]}</span><span class="num">${parse(k).getDate()}</span><span class="dot ${logged.has(k) ? 'on' : ''}"></span></button>`;
+    return `<button class="${cls}" data-k="${k}"><span class="wd">${wd()[i]}</span><span class="num">${parse(k).getDate()}</span><span class="dot ${logged.has(k) ? 'on' : ''}"></span></button>`;
   }).join('')}</div>`;
 
   const day = dayOf(state.selected);
@@ -602,7 +645,7 @@ function renderDay() {
     const ex = exById(it.exId); if (!ex) return '';
     const s = setsFor(it.exId, state.selected);
     const total = Math.max(it.sets || 0, s.length);
-    const sub = s.length ? s.map(x => `${fmtW(x.weight)}×${x.reps}`).join(', ') : `${plural(total, 'set')} planned`;
+    const sub = s.length ? s.map(x => `${W(x.weight)}×${x.reps}`).join(', ') : `${plural(total, 'set')} planned`;
     const confirm = state.pending === 'trash:' + it.exId;
     return `<div class="cell-wrap drag-row" data-row="${it.exId}">
       <button class="grip" aria-label="Drag to reorder ${esc(ex.name)}">${ICON_GRIP}</button>
@@ -679,9 +722,9 @@ function logModel(k, idx) {
 // what you typed → the closest finished set above it today → same set last time → last set last time
 function suggest(m, i) {
   if (m.drafts[i]) return m.drafts[i];
-  for (let j = i - 1; j >= 0; j--) if (m.bySlot[j]) return { w: fmtW(m.bySlot[j].weight), r: String(m.bySlot[j].reps) };
+  for (let j = i - 1; j >= 0; j--) if (m.bySlot[j]) return { w: W(m.bySlot[j].weight), r: String(m.bySlot[j].reps) };
   const p = m.prevSets[i] || m.prevSets[m.prevSets.length - 1];
-  return p ? { w: fmtW(p.weight), r: String(p.reps) } : { w: '', r: '' };
+  return p ? { w: W(p.weight), r: String(p.reps) } : { w: '', r: '' };
 }
 
 function logBodyHTML(m) {
@@ -689,10 +732,10 @@ function logBodyHTML(m) {
   let rows = '';
   for (let i = 0; i < n; i++) {
     const s = bySlot[i];
-    const v = s ? { w: fmtW(s.weight), r: String(s.reps) } : suggest(m, i);
+    const v = s ? { w: W(s.weight), r: String(s.reps) } : suggest(m, i);
     rows += `<div class="setrow ${s ? 'done' : ''}" data-i="${i}">
       <span class="sn">${i + 1}</span>
-      <input class="w" inputmode="decimal" autocomplete="off" aria-label="Set ${i + 1} weight in kg" value="${esc(v.w)}" placeholder="kg">
+      <input class="w" inputmode="decimal" autocomplete="off" aria-label="Set ${i + 1} weight in ${U()}" value="${esc(v.w)}" placeholder="${U()}">
       <input class="r" inputmode="numeric" autocomplete="off" aria-label="Set ${i + 1} reps" value="${esc(v.r)}" placeholder="reps">
       <button class="check" aria-label="${s ? 'Undo' : 'Complete'} set ${i + 1}"><span class="ring">${s ? ICON_CHECK : ''}</span></button>
     </div>`;
@@ -704,7 +747,7 @@ function logBodyHTML(m) {
     <div class="large-title">${esc(ex.name)}</div>
     <button class="lastbar" id="history">
       <span class="main"><span class="lb-label">${prevK ? `Last time · ${fmtShort(prevK)}` : 'Last time'}</span>
-      <span class="lb-sets">${prevK ? prevSets.map(s => `<span style="white-space:nowrap">${fmtW(s.weight)} kg × ${s.reps}</span>`).join(', ') : 'No earlier sessions'}</span></span>
+      <span class="lb-sets">${prevK ? prevSets.map(s => `<span style="white-space:nowrap">${W(s.weight)} ${U()} × ${s.reps}</span>`).join(', ') : 'No earlier sessions'}</span></span>
       <span class="lb-more">History <span class="chev">${ICON_CHEV}</span></span>
     </button>
     ${ex.instructions || vid ? `<details class="instr"><summary>Instructions</summary>
@@ -712,7 +755,7 @@ function logBodyHTML(m) {
       ${vid ? `<a href="https://www.youtube.com/watch?v=${vid}" target="_blank" rel="noopener">Watch video on YouTube ↗</a>` : ''}
     </details>` : ''}
     <div class="group">
-      <div class="sets-head"><span>Set</span><span>kg</span><span>Reps</span><span></span></div>
+      <div class="sets-head"><span>Set</span><span>${U()}</span><span>Reps</span><span></span></div>
       ${rows || '<div class="empty">No sets planned.</div>'}
     </div>
     <div class="stepper glass">
@@ -801,12 +844,12 @@ function renderLog() {
       if (done) inp.addEventListener('change', () => {
         const w = parseW(wIn.value), r = parseR(rIn.value);
         if (isNaN(w) || isNaN(r)) { render(); return; }
-        done.weight = w; done.reps = r; save();
+        done.weight = fromU(w); done.reps = r; save();
       });
     });
     row.querySelector('.check').onclick = () => {
       if (done) {
-        drafts[i] = { w: fmtW(done.weight), r: String(done.reps) };
+        drafts[i] = { w: W(done.weight), r: String(done.reps) };
         data.sets = data.sets.filter(s => s.id !== done.id);
         changed(); return;
       }
@@ -814,7 +857,7 @@ function renderLog() {
       if (isNaN(w)) wIn.classList.add('bad');
       if (isNaN(r)) rIn.classList.add('bad');
       if (isNaN(w) || isNaN(r)) return;
-      data.sets.push({ id: uid(), exId: ex.id, date: k, slot: i, weight: w, reps: r, ts: Date.now() });
+      data.sets.push({ id: uid(), exId: ex.id, date: k, slot: i, weight: fromU(w), reps: r, ts: Date.now() });
       delete drafts[i];
       if (i + 1 > (item.sets || 0)) item.sets = i + 1;
       const d = ensureDay(k);
@@ -999,7 +1042,7 @@ function renderPicker() {
 function ensureDay(k) { return (data.days[k] = data.days[k] || { items: [], workouts: [] }); }
 function addExerciseToDay(exId, sets) {
   const day = ensureDay(state.selected);
-  if (!day.items.some(i => i.exId === exId)) day.items.push({ exId, sets: sets || 3 });
+  if (!day.items.some(i => i.exId === exId)) day.items.push({ exId, sets: sets || data.settings.defaultSets });
   save(); go('log', { logExId: exId });
 }
 function addWorkoutToDay(wId) {
@@ -1029,7 +1072,7 @@ function renderCalendar() {
       <span class="pair glass"><button id="prevM" aria-label="Previous month">${ICON_PREV}</button><button id="nextM" aria-label="Next month">${ICON_NEXT}</button></span></header>
     <div class="large-title">${monthName(m)} <span style="color:var(--label2);font-weight:600">${m.getFullYear()}</span></div>
     <div class="cal-card">
-      <div class="cal-head">${WD.map(w => `<div>${w}</div>`).join('')}</div>
+      <div class="cal-head">${wd().map(w => `<div>${w}</div>`).join('')}</div>
       <div class="cal">${cells.join('')}</div>
     </div>`;
   $('back').onclick = () => go('day');
@@ -1040,9 +1083,9 @@ function renderCalendar() {
 
 /* ================= Progress + history (shared) ================= */
 const STATS = [
-  { key: 'e1rm', label: 'Est. 1RM', unit: 'kg' },
-  { key: 'heaviest', label: 'Heaviest', unit: 'kg' },
-  { key: 'volume', label: 'Volume', unit: 'kg' },
+  { key: 'e1rm', label: 'Est. 1RM', get unit() { return U(); } },
+  { key: 'heaviest', label: 'Heaviest', get unit() { return U(); } },
+  { key: 'volume', label: 'Volume', get unit() { return U(); } },
   { key: 'reps', label: 'Reps', unit: 'reps' },
 ];
 function seriesFor(exId, key) {
@@ -1051,9 +1094,9 @@ function seriesFor(exId, key) {
   return Object.keys(byDate).sort().map(k => {
     const ss = byDate[k];
     let v, note;
-    if (key === 'e1rm') { const best = ss.reduce((a, s) => (e1rm(s) > e1rm(a) ? s : a)); v = e1rm(best); note = `from ${fmtW(best.weight)} × ${best.reps}`; }
-    else if (key === 'heaviest') { v = Math.max(...ss.map(s => s.weight)); note = plural(ss.length, 'set'); }
-    else if (key === 'volume') { v = ss.reduce((a, s) => a + s.weight * s.reps, 0); note = plural(ss.length, 'set'); }
+    if (key === 'e1rm') { const best = ss.reduce((a, s) => (e1rm(s) > e1rm(a) ? s : a)); v = toU(e1rm(best)); note = `from ${W(best.weight)} × ${best.reps}`; }
+    else if (key === 'heaviest') { v = toU(Math.max(...ss.map(s => s.weight))); note = plural(ss.length, 'set'); }
+    else if (key === 'volume') { v = toU(ss.reduce((a, s) => a + s.weight * s.reps, 0)); note = plural(ss.length, 'set'); }
     else { v = ss.reduce((a, s) => a + s.reps, 0); note = plural(ss.length, 'set'); }
     return { k, t: parse(k).getTime(), v, note };
   });
@@ -1086,8 +1129,8 @@ function historyHTML(exId) {
   return `<div class="section">History</div>` + (dates.length ? dates.map(k => {
     const ss = setsFor(exId, k);
     const best = Math.max(...ss.map(e1rm));
-    return `<div class="hcard"><div class="hcard-head"><b>${fmtDayYear(k)}</b><span>e1RM ${fmtStat(best, 'e1rm')} kg</span></div>
-      ${ss.map((s, i) => `<div class="hset"><span class="n">${i + 1}</span><span class="v">${fmtW(s.weight)} kg × ${s.reps}</span></div>`).join('')}</div>`;
+    return `<div class="hcard"><div class="hcard-head"><b>${fmtDayYear(k)}</b><span>e1RM ${fmtStat(toU(best), 'e1rm')} ${U()}</span></div>
+      ${ss.map((s, i) => `<div class="hset"><span class="n">${i + 1}</span><span class="v">${W(s.weight)} ${U()} × ${s.reps}</span></div>`).join('')}</div>`;
   }).join('') : '<div class="group"><div class="empty">No sets logged yet.</div></div>');
 }
 
@@ -1264,6 +1307,209 @@ function renderWorkoutEdit() {
   };
 }
 
+/* ================= SETTINGS tab ================= */
+const APP_VERSION = '0.10';
+function applyTheme() {
+  document.documentElement.dataset.theme = data.settings.theme;
+  const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const m = $('themeColor'); if (m) m.content = dark ? '#000000' : '#f2f2f7';
+}
+const segHTML = (key, opts) => `<div class="seg sm" data-set="${key}">${opts.map(([v, l]) =>
+  `<button data-v="${v}" class="${String(data.settings[key]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+
+function renderSettings() {
+  const st = data.settings;
+  const nSets = data.sets.length, nEx = data.exercises.length;
+  const initial = (st.name.trim()[0] || '?').toUpperCase();
+  const pend = state.pending;
+  app.innerHTML = `
+    <header class="nav"></header>
+    <div class="large-title">Settings</div>
+    <div class="group">
+      <div class="profile"><div class="avatar">${esc(initial)}</div><input id="pName" placeholder="Your name" autocomplete="off" value="${esc(st.name)}" aria-label="Your name"></div>
+      <div class="set-row"><span class="lbl">Account</span><span class="badge">Coming with Friends</span></div>
+    </div>
+
+    <div class="section">Preferences</div>
+    <div class="group">
+      <div class="set-row"><span class="lbl">Units</span>${segHTML('units', [['metric', 'kg'], ['imperial', 'lb']])}</div>
+      <div class="set-row"><span class="lbl">Appearance</span>${segHTML('theme', [['system', 'Auto'], ['light', 'Light'], ['dark', 'Dark']])}</div>
+      <div class="set-row"><span class="lbl">Week starts on</span>${segHTML('weekStart', [[1, 'Mon'], [0, 'Sun']])}</div>
+      <div class="set-row"><span class="lbl">Default sets</span>
+        <div class="mini-stepper"><button id="dsMinus" ${st.defaultSets <= 1 ? 'disabled' : ''} aria-label="Fewer default sets">−</button><span>${st.defaultSets}</span><button id="dsPlus" ${st.defaultSets >= 10 ? 'disabled' : ''} aria-label="More default sets">+</button></div></div>
+    </div>
+    <div class="footnote">Default sets is used when you add a single exercise to a day or to a workout.</div>
+
+    <div class="section">Data</div>
+    <div class="group">
+      <button class="cell action" id="export">Export backup</button>
+      <button class="cell action" id="import">Import backup</button>
+      ${pend && pend.startsWith('import') ? `<button class="cell destructive confirm" id="importOk">Replace everything with this backup?</button>` : ''}
+    </div>
+    <div class="group"><button class="cell destructive ${pend === 'erase' ? 'confirm' : ''}" id="erase">${pend === 'erase' ? `Tap again to erase ${plural(nSets, 'set')} and ${plural(nEx, 'exercise')}` : 'Erase all workout data'}</button></div>
+    <div class="footnote">Your workouts are stored only on this device for now. Export a backup now and then — it's a small file you can keep in Files or iCloud Drive.</div>
+    <div class="err" id="setErr"></div>
+
+    <div class="section">About</div>
+    <div class="group">
+      <div class="set-row"><span class="lbl">Version</span><span class="detail" style="color:var(--label2)">${APP_VERSION}</span></div>
+      <a class="cell" href="https://github.com/lukaslundmark1/Workout-Tracker" target="_blank" rel="noopener"><span class="main">Source code</span><span class="detail" style="color:var(--label2)">GitHub</span><span class="chev">${ICON_CHEV}</span></a>
+    </div>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>`;
+
+  const name = $('pName');
+  name.oninput = () => { st.name = name.value; save(); app.querySelector('.avatar').textContent = (name.value.trim()[0] || '?').toUpperCase(); };
+  app.querySelectorAll('[data-set]').forEach(g => g.querySelectorAll('button').forEach(b => b.onclick = () => {
+    const key = g.dataset.set;
+    const v = key === 'weekStart' ? Number(b.dataset.v) : b.dataset.v;
+    if (st[key] === v) return;
+    st[key] = v;
+    if (key === 'units') state.drafts = {};            // typed-but-unsaved numbers were in the old unit
+    if (key === 'theme') applyTheme();
+    if (key === 'weekStart') state.weekStart = startOfWeek(parse(state.selected));
+    save(); state.pending = null; render();
+  }));
+  $('dsMinus').onclick = () => { st.defaultSets = Math.max(1, st.defaultSets - 1); save(); render(); };
+  $('dsPlus').onclick = () => { st.defaultSets = Math.min(10, st.defaultSets + 1); save(); render(); };
+
+  $('export').onclick = async () => {
+    const json = JSON.stringify(data, null, 2);
+    const fname = `training-backup-${todayKey()}.json`;
+    try {
+      const file = new File([json], fname, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Training backup' }); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+    a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
+  $('import').onclick = () => $('importFile').click();
+  $('importFile').onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const d = JSON.parse(r.result);
+        if (!d || !Array.isArray(d.exercises) || !Array.isArray(d.sets)) throw new Error('bad');
+        state.importData = d; state.pending = 'import'; render();
+      } catch (err) { $('setErr').textContent = "That file isn't a Training backup."; }
+    };
+    r.readAsText(f);
+  };
+  if ($('importOk')) $('importOk').onclick = () => {
+    data = migrate(state.importData); state.importData = null; state.drafts = {};
+    save(); applyTheme(); state.pending = null; render();
+  };
+  $('erase').onclick = () => {
+    if (state.pending !== 'erase') { state.pending = 'erase'; return render(); }
+    data = migrate({ exercises: [], days: {}, sets: [], workouts: [], settings: data.settings });
+    state.drafts = {}; save(); state.pending = null; render();
+  };
+}
+
+/* ================= FRIENDS tab (placeholder) ================= */
+function renderFriends() {
+  app.innerHTML = `
+    <header class="nav"></header>
+    <div class="large-title">Friends</div>
+    <div class="group hero">
+      <div class="hero-icon">${svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M16.5 14.6c2.4.2 4 1.7 4.5 4.4"/>', 40, 1.8)}</div>
+      <h2>Train together</h2>
+      <p>Connect with friends, share workouts and splits, and follow each other's progress. Coming soon.</p>
+    </div>`;
+}
+
+/* ================= Swipe down to close ================= */
+// Pull a slid-up screen (or a sheet) down from the top to close it. It follows your finger,
+// the screen underneath grows back into place, and letting go early springs it back.
+const PULL_BACK = { log: 'day', finish: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList' };
+(function pullToClose() {
+  let p = null;
+  const ease = '.32s cubic-bezier(.2,.85,.3,1)';
+  document.addEventListener('touchstart', e => {
+    p = null;
+    if (e.touches.length > 1) return;
+    const t = e.target, touch = e.touches[0];
+    if (t.closest('input, textarea, .wheel, .grip, .chart, #dock, .pdots, .ghost')) return;
+    const base = { x: touch.clientX, y: touch.clientY, axis: null, dy: 0, ly: touch.clientY, lt: performance.now(), v: 0 };
+    const sheetEl = t.closest('.sheet');
+    if (sheetEl) { if (sheetEl.scrollTop <= 0) p = { ...base, kind: 'sheet', el: sheetEl }; return; }
+    if (state.sheet || !PULL_BACK[state.views[state.tab]] || window.scrollY > 0) return;
+    p = { ...base, kind: 'screen' };
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!p) return;
+    const t = e.touches[0];
+    const dx = t.clientX - p.x, dy = t.clientY - p.y;
+    if (!p.axis) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      p.axis = dy > 0 && Math.abs(dy) > Math.abs(dx) ? 'down' : 'other';
+      if (p.axis !== 'down') { p = null; return; }
+      start();
+    }
+    e.preventDefault();
+    const now = performance.now();
+    p.v = (t.clientY - p.ly) / Math.max(1, now - p.lt); p.ly = t.clientY; p.lt = now;
+    p.dy = Math.max(0, dy);
+    p.layer.style.transform = `translateY(${p.dy}px)`;
+    const k = Math.min(1, p.dy / window.innerHeight);
+    if (p.kind === 'screen') { app.style.transform = `scale(${.94 + .06 * k})`; app.style.opacity = .5 + .5 * k; }
+    else if (p.backdrop) p.backdrop.style.opacity = 1 - k * 1.5;
+  }, { passive: false });
+
+  function start() {
+    if (p.kind === 'sheet') {
+      p.layer = p.el; p.backdrop = document.querySelector('#sheet .backdrop');
+      p.layer.style.animation = 'none'; p.layer.style.transition = 'none';
+      return;
+    }
+    // Put the screen underneath in place now, and keep a snapshot of this one on top to drag
+    p.saved = { views: { ...state.views }, logExId: state.logExId, detailExId: state.detailExId };
+    p.layer = ghost(true);
+    p.layer.style.transition = 'none';
+    state.views[state.tab] = PULL_BACK[state.views[state.tab]];
+    state.pending = null;
+    render();
+    app.classList.remove('enter-up', 'under');
+    app.style.transition = 'none'; app.style.transformOrigin = '50% 0';
+    app.style.transform = 'scale(.94)'; app.style.opacity = '.5';
+  }
+
+  const end = () => {
+    if (!p || p.axis !== 'down') { p = null; return; }
+    const q = p; p = null;
+    const close = q.dy > 110 || (q.v > 0.5 && q.dy > 40);
+    q.layer.style.transition = `transform ${ease}`;
+    if (q.kind === 'sheet') {
+      if (q.backdrop) q.backdrop.style.transition = `opacity ${ease}`;
+      if (close) { q.layer.style.transform = 'translateY(110%)'; if (q.backdrop) q.backdrop.style.opacity = 0; setTimeout(closeSheet, 300); }
+      else { q.layer.style.transform = ''; if (q.backdrop) q.backdrop.style.opacity = ''; }
+      return;
+    }
+    app.style.transition = `transform ${ease}, opacity ${ease}`;
+    if (close) {
+      q.layer.style.transform = 'translateY(100vh)';
+      app.style.transform = ''; app.style.opacity = '';
+      setTimeout(() => { q.layer.remove(); app.style.transition = app.style.transformOrigin = ''; }, 330);
+    } else {
+      q.layer.style.transform = 'translateY(0)';
+      app.style.transform = 'scale(.94)'; app.style.opacity = '.5';
+      setTimeout(() => {
+        Object.assign(state, { logExId: q.saved.logExId, detailExId: q.saved.detailExId });
+        state.views = q.saved.views;
+        app.style.transition = app.style.transform = app.style.opacity = app.style.transformOrigin = '';
+        render();
+        q.layer.remove();
+      }, 330);
+    }
+  };
+  document.addEventListener('touchend', end);
+  document.addEventListener('touchcancel', end);
+})();
+
 /* ================= Bottom sheets ================= */
 function openSheet(s) { state.sheet = s; state.pending = null; renderSheet(); }
 function closeSheet() { state.sheet = null; state.pending = null; renderSheet(); }
@@ -1347,7 +1593,7 @@ function sheetAddToWorkout(el) {
   if (s.step === 'sets') {
     const ex = exById(s.exId);
     el.innerHTML = setsStep(ex.name, 'Back', 'Add to Workout');
-    initWheel('wSets', 2); // default 3 sets
+    initWheel('wSets', data.settings.defaultSets - 1); // default from Settings
     $('sBack').onclick = () => { s.step = 'pick'; renderSheet(); };
     $('sOk').onclick = () => { dr.items.push({ exId: ex.id, sets: SET_OPTIONS[wheelIndex('wSets')].v }); closeSheet(); render(); };
     return;
@@ -1385,8 +1631,9 @@ function sheetSetCount(el) {
   $('sOk').onclick = () => { it.sets = SET_OPTIONS[wheelIndex('wSets')].v; closeSheet(); render(); };
 }
 
+applyTheme();
 render();
-try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (!state.sheet) render(); }); } catch (e) {}
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); if (!state.sheet) render(); }); } catch (e) {}
 
 /* ================= Offline support ================= */
 if ('serviceWorker' in navigator) {
