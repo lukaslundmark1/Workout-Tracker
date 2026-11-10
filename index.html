@@ -547,7 +547,7 @@ const app = $('app');
 const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList', friends: 'friends', settings: 'settings' };
 
 function render() {
-  const VIEWS = { day: renderDay, log: renderLog, finish: renderFinish, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
+  const VIEWS = { day: renderDay, log: renderLog, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
                   wList: renderWorkoutList, wEdit: renderWorkoutEdit, pView: renderPlanView, pEdit: renderPlanEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
                   friends: renderFriends, friend: renderFriend, fEx: renderFriendExercise, settings: renderSettings };
   clearInterval(timerTick);
@@ -557,7 +557,7 @@ function render() {
   renderDock();
   renderSheet();
 }
-const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, finish: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, fEx: 2 };
+const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, fEx: 2 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
 function ghost(onTop) {
@@ -825,41 +825,25 @@ function logBodyHTML(m) {
       <button id="plus" aria-label="Add a set">+</button>
     </div>
     ${!isFinished(state.selected) && (m.idx === m.total - 1 || setsLeft(state.selected) === 0)
-      ? `<button class="primary finish-btn" id="finishHere">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>
-         ${m.idx === m.total - 1 ? '<div class="footnote" style="text-align:center">Last exercise. Swipe left for more options.</div>' : ''}` : ''}`;
+      ? `<button class="primary finish-btn" id="finishHere">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
+    ${m.idx === m.total - 1 ? `<button class="btn-tinted" id="addMore" ${isFinished(state.selected) ? 'style="margin-top:22px"' : ''}>${ICON_PLUS} Add exercise</button>` : ''}`;
 }
 
-function finishBodyHTML(k) {
-  const s = dayOf(k).session;
-  const left = setsLeft(k);
-  const done = s && s.end;
-  return `
-    <div class="finish">
-      <div class="finish-icon ${done ? 'done' : ''}">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 44, 2.6)}</div>
-      <div class="large-title" style="text-align:center;margin-bottom:6px">${done ? 'Workout finished' : 'End of workout'}</div>
-      <div class="finish-sub">${done ? `Finished in ${fmtMins(s.end - s.start)}` : left ? `${plural(left, 'planned set')} not logged yet` : 'Every planned set is logged'}</div>
-      ${done ? `<button class="primary" id="editDur">Change duration</button>` : `<button class="primary" id="finishW">Finish workout</button>`}
-      <button class="btn-tinted" id="addMore">${ICON_PLUS} Add exercise</button>
-    </div>`;
-}
-
-// Page dots: one per exercise plus the end page. Tap one to jump there.
+// Page dots: one per exercise. Tap one to jump there.
 function dotsHTML(k, current) {
   const items = dayOf(k).items;
-  const dots = items.map((it, i) => `<button class="pdot ${i === current ? 'on' : ''}" data-page="${i}" aria-label="Exercise ${i + 1}"></button>`).join('');
-  return `<div class="pdots glass" role="tablist">${dots}<button class="pdot end ${current === items.length ? 'on' : ''}" data-page="${items.length}" aria-label="End of workout"></button></div>`;
+  if (items.length < 2) return '';
+  return `<div class="pdots glass" role="tablist">${items.map((it, i) => `<button class="pdot ${i === current ? 'on' : ''}" data-page="${i}" aria-label="Exercise ${i + 1}"></button>`).join('')}</div>`;
 }
-// Page index i: 0..items-1 = exercises, items.length = end page
 function pageHTML(k, i) {
   const items = dayOf(k).items;
-  if (i < 0 || i > items.length) return null;
-  return i === items.length ? finishBodyHTML(k) : logBodyHTML(logModel(k, i));
+  if (i < 0 || i >= items.length) return null;   // nothing past the last exercise: it just bounces
+  return logBodyHTML(logModel(k, i));
 }
 function goPage(k, i, slide) {
   const items = dayOf(k).items;
-  if (i < 0 || i > items.length) return;
-  if (i === items.length) go('finish', { slide });
-  else go('log', { logExId: items[i].exId, slide });
+  if (i < 0 || i >= items.length) return;
+  go('log', { logExId: items[i].exId, slide });
 }
 function pagerShell(k, i, body) {
   return `
@@ -893,6 +877,7 @@ function renderLog() {
 
   const changed = () => { save(); state.pending = null; render(); };
   if ($('finishHere')) $('finishHere').onclick = () => openFinish(k);
+  if ($('addMore')) $('addMore').onclick = () => go('picker', { pickerQuery: '', pickerMode: 'exercises', anim: 'up' });
   $('history').onclick = () => go('history', { stat: 'e1rm' });
   $('plus').onclick = () => { item.sets = n + 1; changed(); };
   $('minus').onclick = () => { if (!(n > 0 && !bySlot[n - 1])) return; item.sets = n - 1; delete drafts[n - 1]; changed(); };
@@ -1024,18 +1009,6 @@ function wireTimer(k) {
   };
   const s = dayOf(k).session;
   if (s && !s.end) timerTick = setInterval(() => { const t = $('timerText'); if (t) t.textContent = fmtDur(Date.now() - s.start); }, 1000);
-}
-
-/* ================= TODAY: end-of-workout page (swipe past the last exercise) ================= */
-function renderFinish() {
-  const k = state.selected;
-  const day = dayOf(k);
-  if (!day.items.length) return go('day');
-  app.innerHTML = pagerShell(k, day.items.length, finishBodyHTML(k));
-  wirePager(k, day.items.length);
-  if ($('finishW')) $('finishW').onclick = () => openSheet({ type: 'duration', k });
-  if ($('editDur')) $('editDur').onclick = () => openSheet({ type: 'duration', k });
-  $('addMore').onclick = () => go('picker', { pickerQuery: '', pickerMode: 'exercises', anim: 'up' });
 }
 
 /* Duration sheet: confirm/adjust the workout length to the minute */
@@ -1894,7 +1867,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.14';
+const APP_VERSION = '0.14.1';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2322,7 +2295,7 @@ function sheetAcceptFriend(el) {
 /* ================= Swipe down to close ================= */
 // Pull a slid-up screen (or a sheet) down from the top to close it. It follows your finger,
 // the screen underneath grows back into place, and letting go early springs it back.
-const PULL_BACK = { log: 'day', finish: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList', friend: 'friends', fEx: 'friend' };
+const PULL_BACK = { log: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList', friend: 'friends', fEx: 'friend' };
 (function pullToClose() {
   let p = null;
   const ease = '.32s cubic-bezier(.2,.85,.3,1)';
