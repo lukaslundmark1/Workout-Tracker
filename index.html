@@ -349,6 +349,17 @@
   .tint { color: var(--tint); padding: 8px 4px; font-weight: 500; }
   .tint:active { opacity: .5; }
 
+  /* Plans */
+  .dot.plan { background: transparent; box-shadow: inset 0 0 0 1.5px var(--label3); }
+  .day.sel .dot.plan { box-shadow: inset 0 0 0 1.5px var(--bg); }
+  .pill-active { font-size: 12px; font-weight: 600; color: var(--green); background: var(--green-soft); border-radius: 10px; padding: 3px 8px; }
+  .daynum { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 13px; background: var(--fill); color: var(--label2); font-family: var(--rounded); font-size: 13px; font-weight: 700; margin-right: 12px; vertical-align: middle; }
+  .daynum.now { background: var(--tint); color: #fff; }
+  .set-row .main { display: flex; align-items: center; font-weight: 500; }
+  .move-btn { height: 36px; font-size: 14px; margin: -4px 0 14px; padding: 0 14px; color: var(--tint); }
+  .date-input { border: 0; background: var(--fill); border-radius: 10px; padding: 7px 10px; font-size: 16px; color: var(--label); font-family: inherit; }
+  .primary:disabled { opacity: .45; }
+
   /* Floating tab bar */
   #dock {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 10;
@@ -395,6 +406,8 @@ function migrate(d) {
     let i = 0;
     g.sort((a, b) => a.ts - b.ts).forEach(s => { while (taken.has(i)) i++; s.slot = i++; });
   });
+  d.plans = d.plans || [];
+  if (d.activePlan === undefined) d.activePlan = null;
   d.settings = Object.assign({ units: 'metric', theme: 'system', weekStart: 1, defaultSets: 3, name: '' }, d.settings || {});
   d.version = 3;
   return d;
@@ -428,9 +441,11 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 const fmtW = w => String(Math.round(w * 100) / 100);
 const exById = id => data.exercises.find(e => e.id === id);
 const woById = id => data.workouts.find(w => w.id === id);
-const dayOf = k => data.days[k] || { items: [], workouts: [] };
+const dayOf = k => data.days[k] || virtualDay(k) || { items: [], workouts: [] };
 const setsFor = (exId, k) => data.sets.filter(s => s.exId === exId && s.date === k).sort((a, b) => a.slot - b.slot || a.ts - b.ts);
 const loggedDays = () => new Set(data.sets.map(s => s.date));
+// Filled dot = trained that day; ring = a planned workout day still to come
+const dotCls = (k, logged) => logged.has(k) ? 'on' : (k >= todayKey() && dayOf(k).items.length) ? 'plan' : '';
 const byName = (a, b) => a.name.localeCompare(b.name);
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const $ = id => document.getElementById(id);
@@ -505,7 +520,7 @@ const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList', friends:
 
 function render() {
   const VIEWS = { day: renderDay, log: renderLog, finish: renderFinish, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
-                  wList: renderWorkoutList, wEdit: renderWorkoutEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
+                  wList: renderWorkoutList, wEdit: renderWorkoutEdit, pView: renderPlanView, pEdit: renderPlanEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
                   friends: renderFriends, settings: renderSettings };
   clearInterval(timerTick);
   app.ontouchstart = app.ontouchend = null;
@@ -514,7 +529,7 @@ function render() {
   renderDock();
   renderSheet();
 }
-const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, finish: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, history: 2 };
+const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, finish: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
 function ghost(onTop) {
@@ -648,10 +663,12 @@ function renderDay() {
   const weekHTML = ws => `<div class="week">${Array.from({ length: 7 }, (_, i) => {
     const k = dk(addDays(ws, i));
     const cls = ['day', k === tk && 'today', k === state.selected && 'sel'].filter(Boolean).join(' ');
-    return `<button class="${cls}" data-k="${k}"><span class="wd">${wd()[i]}</span><span class="num">${parse(k).getDate()}</span><span class="dot ${logged.has(k) ? 'on' : ''}"></span></button>`;
+    return `<button class="${cls}" data-k="${k}"><span class="wd">${wd()[i]}</span><span class="num">${parse(k).getDate()}</span><span class="dot ${dotCls(k, logged)}"></span></button>`;
   }).join('')}</div>`;
 
   const day = dayOf(state.selected);
+  const pd = planDayFor(state.selected);
+  const canMove = pd && pd.workout && state.selected >= tk && !logged.has(state.selected) && !(day.session && day.session.start);
   const rows = day.items.map(it => {
     const ex = exById(it.exId); if (!ex) return '';
     const s = setsFor(it.exId, state.selected);
@@ -675,7 +692,8 @@ function renderDay() {
     </header>
     <div class="week-wrap" id="weekWrap"><div class="week-track" id="weekTrack">${weekHTML(state.weekStart)}</div></div>
     <div class="day-title">${fmtLong(state.selected)}</div>
-    <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
+    <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ' (moved)'}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
+    ${canMove ? `<button class="capsule glass move-btn" id="moveDay">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 16, 2.2)} Move to tomorrow</button>` : ''}
     ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
     <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
 
@@ -687,19 +705,20 @@ function renderDay() {
   $('addEx').onclick = () => go('picker', { pickerQuery: '', pickerMode: data.workouts.length ? 'workouts' : 'exercises' });
   app.querySelectorAll('.day').forEach(b => b.onclick = () => { state.selected = b.dataset.k; render(); });
   app.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => go('log', { logExId: b.dataset.ex }));
+  if ($('moveDay')) $('moveDay').onclick = () => { shiftPlan(state.selected, 1); save(); render(); };
   app.querySelectorAll('[data-trash]').forEach(b => b.onclick = () => {
     const exId = b.dataset.trash, k = state.selected;
     const hasSets = setsFor(exId, k).length > 0;
     if (hasSets && state.pending !== 'trash:' + exId) { state.pending = 'trash:' + exId; return render(); }
-    const d = data.days[k];
+    const d = ensureDay(k);
     d.items = d.items.filter(i => i.exId !== exId);
     data.sets = data.sets.filter(x => !(x.exId === exId && x.date === k));
     delete state.drafts[exId + '|' + k];
-    if (!d.items.length) delete data.days[k];
+    if (!d.items.length && !d.plan) delete data.days[k];   // an emptied planned day stays (as empty) so the plan doesn't refill it
     save(); state.pending = null; render();
   });
   if ($('dayList')) makeSortable($('dayList'), (from, to) => {
-    const items = data.days[state.selected].items;
+    const items = ensureDay(state.selected).items;
     items.splice(to, 0, items.splice(from, 1)[0]);
     save(); render();
   });
@@ -832,7 +851,9 @@ function renderLog() {
   const idx = dayOf(k).items.findIndex(it => it.exId === state.logExId);
   const m = idx >= 0 && logModel(k, idx);
   if (!m) return go('day');
-  const { ex, item, bySlot, n, drafts } = m;
+  const { ex, bySlot, n, drafts } = m;
+  const item = new Proxy({}, { get: (_, p) => realItem()[p], set: (_, p, v) => { realItem()[p] = v; return true; } });
+  function realItem() { return ensureDay(k).items.find(it => it.exId === ex.id); }
   app.innerHTML = pagerShell(k, idx, logBodyHTML(m));
   wirePager(k, idx);
 
@@ -1050,7 +1071,8 @@ function renderPicker() {
   q.oninput = draw;
   draw();
 }
-function ensureDay(k) { return (data.days[k] = data.days[k] || { items: [], workouts: [] }); }
+// Makes a day real (stored). A planned day that hasn't been touched yet is filled in from the plan.
+function ensureDay(k) { return (data.days[k] = data.days[k] || virtualDay(k) || { items: [], workouts: [] }); }
 function addExerciseToDay(exId, sets) {
   const day = ensureDay(state.selected);
   if (!day.items.some(i => i.exId === exId)) day.items.push({ exId, sets: sets || data.settings.defaultSets });
@@ -1076,7 +1098,7 @@ function renderCalendar() {
     if (i >= 35 && d.getMonth() !== m.getMonth()) break;
     const k = dk(d);
     const cls = [d.getMonth() !== m.getMonth() && 'out', k === tk && 'today', k === state.selected && 'sel'].filter(Boolean).join(' ');
-    cells.push(`<button class="${cls}" data-k="${k}"><span class="num">${d.getDate()}</span><span class="dot ${logged.has(k) ? 'on' : ''}"></span></button>`);
+    cells.push(`<button class="${cls}" data-k="${k}"><span class="num">${d.getDate()}</span><span class="dot ${dotCls(k, logged)}"></span></button>`);
   }
   app.innerHTML = `
     <header class="nav">${backBtn('day view')}<span class="spacer"></span>
@@ -1261,17 +1283,241 @@ function renderExerciseDetail() {
   wireProgress(ex.id);
 }
 
+/* ================= Plans (rotation) ================= */
+// A plan is a rotation of days (Day 1, Day 2, …; rest days count) that runs on the calendar from a
+// start date and repeats. Only one plan is active at a time. Planned days are read from the plan
+// until you touch them; once you log a set or change a day it becomes that day's own copy.
+// Moving/shifting inserts gap days (positive) or skips ahead (negative) from a date onwards.
+const daysBetween = (a, b) => Math.round((parse(b) - parse(a)) / 86400000);
+const planById = id => data.plans.find(p => p.id === id);
+const activePlan = () => (data.activePlan && planById(data.activePlan.planId)) ? data.activePlan : null;
+function planEnd(ap, plan) {
+  if (!plan.weeks) return null;
+  const extra = (ap.shifts || []).reduce((a, s) => a + s.by, 0);
+  return dk(addDays(parse(ap.begin), plan.weeks * 7 + extra));
+}
+function planDayFor(k) {
+  const ap = activePlan(); if (!ap) return null;
+  const plan = planById(ap.planId); const len = plan.days.length;
+  if (!len || k < ap.begin) return null;
+  const end = planEnd(ap, plan); if (end && k >= end) return null;
+  let off = 0;
+  for (const s of [...(ap.shifts || [])].sort((a, b) => (a.from < b.from ? -1 : 1))) {
+    if (k < s.from) continue;
+    if (s.by > 0 && daysBetween(s.from, k) < s.by) return { plan, ap, index: -1, workout: null, moved: true };
+    off += s.by;
+  }
+  const n = daysBetween(ap.start, k) - off;
+  if (n < 0) return { plan, ap, index: -1, workout: null, moved: true };
+  const index = n % len;
+  return { plan, ap, index, cycle: Math.floor(n / len) + 1, workout: woById(plan.days[index].workoutId) || null };
+}
+function virtualDay(k) {
+  const pd = planDayFor(k);
+  if (!pd || !pd.workout) return null;
+  return { items: pd.workout.items.filter(i => exById(i.exId)).map(i => ({ exId: i.exId, sets: i.sets })),
+           workouts: [{ id: pd.workout.id, name: pd.workout.name }], plan: { id: pd.plan.id, index: pd.index } };
+}
+const planDayLabel = (plan, i) => { const w = woById(plan.days[i].workoutId); return w ? w.name : 'Rest'; };
+const planSummary = p => `${p.days.length}-day rotation · ${plural(p.days.filter(d => woById(d.workoutId)).length, 'workout')} · ${p.weeks ? plural(p.weeks, 'week') : 'ongoing'}`;
+
+// Move a planned day (and everything after it) later by n days
+function shiftPlan(from, by) {
+  const ap = activePlan(); if (!ap || !by) return;
+  ap.shifts = ap.shifts || [];
+  ap.shifts.push({ from, by });
+  // Days that were only filled in from the plan (nothing logged) are recalculated
+  for (const k in data.days) {
+    if (k >= from && data.days[k].plan && !data.sets.some(s => s.date === k) && !data.days[k].session) delete data.days[k];
+  }
+}
+
+function renderPlanList() {
+  const ap = activePlan();
+  const list = data.plans.slice().sort((a, b) => (ap && a.id === ap.planId ? -1 : ap && b.id === ap.planId ? 1 : a.name.localeCompare(b.name)));
+  return `${list.length ? `<div class="group">${list.map(p => cell({ attrs: `data-plan="${p.id}"`, main: esc(p.name), sub: planSummary(p),
+      detail: ap && ap.planId === p.id ? '<span class="pill-active">Active</span>' : '' })).join('')}</div>` : ''}
+    <button class="btn-tinted" id="newP">${ICON_PLUS} Create a new plan</button>
+    ${!list.length ? '<div class="footnote" style="text-align:center">A plan is a rotation of your workouts and rest days that fills in your calendar.</div>' : ''}`;
+}
+
+function renderPlanView() {
+  const p = planById(state.planId);
+  if (!p) return go('wList');
+  const ap = activePlan();
+  const isActive = ap && ap.planId === p.id;
+  const tk = todayKey();
+  const pdToday = isActive ? planDayFor(tk) : null;
+  const end = isActive ? planEnd(ap, p) : null;
+  const pend = state.pending;
+  app.innerHTML = `
+    <header class="nav">${backBtn('Workouts')}<span class="spacer"></span><button class="capsule glass" id="editP">Edit</button></header>
+    <div class="large-title">${esc(p.name)}</div>
+    <div class="day-sub" style="margin-top:-8px">${isActive
+      ? `Active since ${fmtTiny(ap.begin)}${pdToday && pdToday.index >= 0 ? ` · today is day ${pdToday.index + 1}, cycle ${pdToday.cycle}` : ''}${end ? ` · ends ${fmtTiny(end)}` : ''}`
+      : planSummary(p)}</div>
+    <div class="section">Rotation</div>
+    <div class="group">${p.days.map((d, i) => {
+      const w = woById(d.workoutId), now = pdToday && pdToday.index === i;
+      return `<div class="set-row"><span class="main"><span class="daynum ${now ? 'now' : ''}">${i + 1}</span>${w ? esc(w.name) : '<span style="color:var(--label2)">Rest</span>'}</span>
+        <span class="detail" style="color:var(--label2)">${now ? 'Today' : w ? plural(w.items.length, 'exercise') : ''}</span></div>`;
+    }).join('') || '<div class="empty">No days yet. Tap Edit to build the rotation.</div>'}</div>
+    <div class="footnote">After the last day it starts again from day 1.${p.weeks ? ` Runs for ${plural(p.weeks, 'week')}.` : ' Runs until you end it.'}</div>
+    ${isActive ? `
+      <div class="group" style="margin-top:24px">
+        <button class="cell action" id="shiftP">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 18, 2.2)}Shift schedule</button>
+      </div>
+      <div class="footnote">Couldn't train one day? Use “Move to tomorrow” on that day in Today. Shift schedule moves the whole rotation from today.</div>
+      <div class="group" style="margin-top:24px"><button class="cell destructive ${pend === 'endP' ? 'confirm' : ''}" id="endP">${pend === 'endP' ? 'Tap again to end this plan' : 'End plan'}</button></div>`
+    : `<button class="primary" id="startP" ${p.days.length ? '' : 'disabled'}>Start plan</button>`}`;
+  $('back').onclick = () => go('wList');
+  $('editP').onclick = () => go('pEdit', { pdraft: { id: p.id, name: p.name, weeks: p.weeks, days: p.days.map(d => ({ ...d })) } });
+  if ($('startP')) $('startP').onclick = () => openSheet({ type: 'planStart', planId: p.id });
+  if ($('shiftP')) $('shiftP').onclick = () => openSheet({ type: 'planShift' });
+  if ($('endP')) $('endP').onclick = () => {
+    if (state.pending !== 'endP') { state.pending = 'endP'; return render(); }
+    // Keep days already filled in; future planned days disappear
+    for (const k in data.days) if (k >= tk && data.days[k].plan && !data.sets.some(s => s.date === k)) delete data.days[k];
+    data.activePlan = null; save(); state.pending = null; render();
+  };
+}
+
+function renderPlanEdit() {
+  const dr = state.pdraft;
+  if (!dr) return go('wList');
+  const rows = dr.days.map((d, i) => {
+    const w = woById(d.workoutId);
+    return `<div class="cell-wrap drag-row" style="display:flex;align-items:center">
+      <button class="circle" data-rmday="${i}" aria-label="Remove day ${i + 1}" style="color:var(--red);margin-left:8px;width:36px;height:36px">${svg('<circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="M8 12h8" stroke="#fff" stroke-width="2.2"/>', 22)}</button>
+      ${cell({ attrs: `data-day="${i}" style="padding-left:4px;padding-right:4px"`, main: `<span class="daynum">${i + 1}</span>${w ? esc(w.name) : '<span style="color:var(--label2)">Rest</span>'}`, detail: w ? plural(w.items.length, 'exercise') : '' })}
+      <button class="grip" aria-label="Drag to reorder">${ICON_GRIP}</button>
+    </div>`;
+  }).join('');
+  app.innerHTML = `
+    <header class="nav">${closeBtn('cancel')}<span class="spacer"></span><b class="title">${dr.id ? 'Edit Plan' : 'New Plan'}</b><span class="spacer"></span>${okBtn('saveP')}</header>
+    <div class="group" style="margin-top:8px"><input class="field-input" id="pName" placeholder="Plan name, e.g. Push pull legs" autocomplete="off" style="font-size:20px;font-weight:600"></div>
+    <div class="section">Rotation</div>
+    <div class="group"><div id="dayRows">${rows}</div>
+      <div class="cell-wrap"><button class="cell action" id="addDay">${plusLead}Add workout day</button></div>
+      <div class="cell-wrap"><button class="cell action" id="addRest">${plusLead}Add rest day</button></div></div>
+    <div class="footnote">The days repeat in this order. Tap a day to change it, drag ≡ to reorder.</div>
+    <div class="section">Length</div>
+    <div class="group"><div class="set-row"><span class="lbl">Run for</span>
+      <div class="mini-stepper"><button id="wkMinus" aria-label="Shorter">−</button><span style="min-width:84px">${dr.weeks ? plural(dr.weeks, 'week') : 'Ongoing'}</span><button id="wkPlus" aria-label="Longer">+</button></div></div></div>
+    <div class="err" id="pErr"></div>
+    ${dr.id ? `<div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'delP' ? 'confirm' : ''}" id="delP">${state.pending === 'delP' ? 'Tap again to delete' : 'Delete Plan'}</button></div>` : ''}`;
+  const name = $('pName');
+  name.value = dr.name;
+  name.oninput = () => { dr.name = name.value; };
+  const back = () => go(dr.id ? 'pView' : 'wList', { pdraft: null });
+  $('cancel').onclick = back;
+  $('addDay').onclick = () => openSheet({ type: 'planDay', index: dr.days.length, isNew: true });
+  $('addRest').onclick = () => { dr.days.push({ workoutId: null }); render(); };
+  app.querySelectorAll('[data-day]').forEach(b => b.onclick = () => openSheet({ type: 'planDay', index: Number(b.dataset.day) }));
+  app.querySelectorAll('[data-rmday]').forEach(b => b.onclick = () => { dr.days.splice(Number(b.dataset.rmday), 1); render(); });
+  makeSortable($('dayRows'), (from, to) => { dr.days.splice(to, 0, dr.days.splice(from, 1)[0]); render(); });
+  $('wkMinus').onclick = () => { dr.weeks = Math.max(0, (dr.weeks || 0) - 1); render(); };
+  $('wkPlus').onclick = () => { dr.weeks = Math.min(52, (dr.weeks || 0) + 1); render(); };
+  $('saveP').onclick = () => {
+    const nm = dr.name.trim();
+    if (!nm) { $('pErr').textContent = 'Give the plan a name.'; name.focus(); return; }
+    if (!dr.days.some(d => woById(d.workoutId))) { $('pErr').textContent = 'Add at least one workout day.'; return; }
+    let id = dr.id;
+    if (id) Object.assign(planById(id), { name: nm, weeks: dr.weeks, days: dr.days });
+    else { id = uid(); data.plans.push({ id, name: nm, weeks: dr.weeks, days: dr.days }); }
+    save(); go('pView', { pdraft: null, planId: id });
+  };
+  if ($('delP')) $('delP').onclick = () => {
+    if (state.pending !== 'delP') { state.pending = 'delP'; return render(); }
+    if (data.activePlan && data.activePlan.planId === dr.id) data.activePlan = null;
+    data.plans = data.plans.filter(p => p.id !== dr.id);
+    save(); go('wList', { pdraft: null });
+  };
+}
+
+/* Sheet: pick what a rotation day is */
+function sheetPlanDay(el) {
+  const s = state.sheet, dr = state.pdraft;
+  const cur = dr.days[s.index];
+  const list = data.workouts.slice().sort(byName);
+  el.innerHTML = sheetOpen('Choose day', `${closeBtn('sCancel')}<b>Day ${s.index + 1}</b><span></span>`, `
+    <div class="group">
+      <button class="cell" data-w="">${'<span class="main" style="color:var(--label2)">Rest</span>'}${cur && !cur.workoutId && !s.isNew ? `<span class="chev" style="color:var(--tint)">${ICON_OK}</span>` : ''}</button>
+    </div>
+    <div class="section">Workouts</div>
+    ${list.length ? `<div class="group">${list.map(w => `<button class="cell" data-w="${w.id}"><span class="main"><div>${esc(w.name)}</div><div class="sub">${plural(w.items.length, 'exercise')}</div></span>${cur && cur.workoutId === w.id ? `<span class="chev" style="color:var(--tint)">${ICON_OK}</span>` : ''}</button>`).join('')}</div>`
+      : '<div class="group"><div class="empty">No workouts yet. Create some in the Workouts list first.</div></div>'}`);
+  $('sCancel').onclick = () => closeSheet();
+  el.querySelectorAll('[data-w]').forEach(b => b.onclick = () => {
+    const v = { workoutId: b.dataset.w || null };
+    if (s.isNew) dr.days.push(v); else dr.days[s.index] = v;
+    closeSheet(); render();
+  });
+}
+
+/* Sheet: start a plan (date + which day to start on) */
+function sheetPlanStart(el) {
+  const s = state.sheet, p = planById(s.planId), ap = activePlan();
+  const replacing = ap && ap.planId !== p.id ? planById(ap.planId) : null;
+  s.date = s.date || todayKey();
+  el.innerHTML = sheetOpen('Start plan', `${closeBtn('sCancel')}<b>Start ${esc(p.name)}</b><span></span>`, `
+    <div class="group">
+      <div class="set-row"><span class="lbl">First day</span><input type="date" id="pDate" class="date-input" value="${s.date}"></div>
+    </div>
+    <div class="section">Start with</div>
+    <div class="group"><div class="wheels">${wheelHTML('wDay', p.days.map((d, i) => ({ v: i, label: `Day ${i + 1} · ${planDayLabel(p, i)}` })))}</div></div>
+    ${replacing ? `<div class="footnote" style="color:var(--red)">This ends ${esc(replacing.name)}. Days you've already trained are kept.</div>` : ''}
+    <button class="primary" id="sGo">${replacing ? 'Replace and start' : 'Start plan'}</button>`);
+  initWheel('wDay', 0);
+  $('pDate').onchange = e => { s.date = e.target.value || todayKey(); };
+  $('sCancel').onclick = () => closeSheet();
+  $('sGo').onclick = () => {
+    const first = s.date, startIdx = wheelIndex('wDay');
+    for (const k in data.days) if (k >= todayKey() && data.days[k].plan && !data.sets.some(x => x.date === k)) delete data.days[k];
+    data.activePlan = { planId: p.id, begin: first, start: dk(addDays(parse(first), -startIdx)), shifts: [] };
+    save(); state.sheet = null;
+    render();
+  };
+}
+
+/* Sheet: shift the whole rotation from today */
+const SHIFT_OPTS = Array.from({ length: 29 }, (_, i) => { const v = i - 14; return { v, label: v === 0 ? 'No change' : `${v > 0 ? '+' : '−'}${Math.abs(v)} ${Math.abs(v) === 1 ? 'day' : 'days'}` }; });
+function sheetPlanShift(el) {
+  el.innerHTML = sheetOpen('Shift schedule', `${closeBtn('sCancel')}<b>Shift schedule</b>${okBtn('sSave', 'Apply shift')}`, `
+    <div class="finish-sub" style="margin:0 8px 10px">Moves every planned day you haven't trained yet. + pushes later, − pulls earlier.</div>
+    <div class="group" style="max-width:240px;margin:0 auto"><div class="wheels">${wheelHTML('wShift', SHIFT_OPTS)}</div></div>`);
+  initWheel('wShift', 14);
+  $('sCancel').onclick = () => closeSheet();
+  $('sSave').onclick = () => {
+    // Start from the first day you haven't trained yet, so a workout you've already done doesn't come round again
+    let from = todayKey();
+    while (data.sets.some(x => x.date === from) || (data.days[from] && data.days[from].session)) from = dk(addDays(parse(from), 1));
+    shiftPlan(from, SHIFT_OPTS[wheelIndex('wShift')].v); save(); state.sheet = null; render();
+  };
+}
+
 /* ================= WORKOUTS tab ================= */
 function renderWorkoutList() {
   const list = data.workouts.slice().sort(byName);
-  app.innerHTML = `
+  const seg = state.wSeg || 'plans';
+  const head = `
     <header class="nav"></header>
     <div class="large-title">Workouts</div>
+    <div class="seg"><button data-wseg="plans" class="${seg === 'plans' ? 'on' : ''}">Plans</button><button data-wseg="workouts" class="${seg === 'workouts' ? 'on' : ''}">Workouts</button></div>`;
+  if (seg === 'plans') {
+    app.innerHTML = head + renderPlanList();
+    app.querySelectorAll('[data-wseg]').forEach(b => b.onclick = () => { state.wSeg = b.dataset.wseg; render(); });
+    $('newP').onclick = () => go('pEdit', { pdraft: { id: null, name: '', weeks: 8, days: [] } });
+    app.querySelectorAll('[data-plan]').forEach(b => b.onclick = () => go('pView', { planId: b.dataset.plan }));
+    return;
+  }
+  app.innerHTML = head + `
     ${list.length ? `<div class="group">${list.map(w => cell({ attrs: `data-id="${w.id}"`, main: esc(w.name),
       sub: `${plural(w.items.length, 'exercise')} · ${plural(w.items.reduce((a, i) => a + i.sets, 0), 'set')}` })).join('')}</div>` : ''}
     <button class="btn-tinted" id="newW">${ICON_PLUS} Create a new workout</button>`;
   const create = () => go('wEdit', { draft: { id: null, name: '', items: [] } });
   $('newW').onclick = create;
+  app.querySelectorAll('[data-wseg]').forEach(b => b.onclick = () => { state.wSeg = b.dataset.wseg; render(); });
   app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => {
     const w = woById(b.dataset.id);
     go('wEdit', { draft: { id: w.id, name: w.name, items: w.items.map(i => ({ ...i })) } });
@@ -1338,7 +1584,14 @@ const COLS = {
   workouts: { get: () => Object.fromEntries(data.workouts.map(w => [w.id, w])), set: m => { data.workouts = Object.values(m); } },
   days: { get: () => ({ ...data.days }), set: m => { data.days = m; } },
   sets: { get: () => Object.fromEntries(data.sets.map(s => [s.id, s])), set: m => { data.sets = Object.values(m); } },
-  meta: { get: () => ({ settings: data.settings }), set: m => { if (m.settings) data.settings = migrate({ exercises: [], days: {}, sets: [], settings: m.settings }).settings; } },
+  plans: { get: () => Object.fromEntries(data.plans.map(p => [p.id, p])), set: m => { data.plans = Object.values(m); } },
+  meta: {
+    get: () => ({ settings: data.settings, active: data.activePlan || { planId: null } }),
+    set: m => {
+      if (m.settings) data.settings = migrate({ exercises: [], days: {}, sets: [], settings: m.settings }).settings;
+      if (m.active) data.activePlan = m.active.planId ? m.active : null;
+    },
+  },
 };
 const hash = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
 const syncKey = uid => 'tt.sync.' + uid;
@@ -1564,7 +1817,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.11';
+const APP_VERSION = '0.12';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -1693,7 +1946,7 @@ function renderFriends() {
 /* ================= Swipe down to close ================= */
 // Pull a slid-up screen (or a sheet) down from the top to close it. It follows your finger,
 // the screen underneath grows back into place, and letting go early springs it back.
-const PULL_BACK = { log: 'day', finish: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList' };
+const PULL_BACK = { log: 'day', finish: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList' };
 (function pullToClose() {
   let p = null;
   const ease = '.32s cubic-bezier(.2,.85,.3,1)';
@@ -1786,7 +2039,8 @@ function renderSheet() {
   const el = $('sheet');
   if (!state.sheet) { el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); return; }
   el.hidden = false; document.body.classList.add('locked');
-  ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration, signin: sheetSignin })[state.sheet.type](el);
+  ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration, signin: sheetSignin,
+     planDay: sheetPlanDay, planStart: sheetPlanStart, planShift: sheetPlanShift })[state.sheet.type](el);
 }
 const sheetOpen = (label, head, body) => `<div class="backdrop"></div><div class="sheet" role="dialog" aria-label="${esc(label)}"><div class="sheet-head">${head}</div>${body}</div>`;
 
