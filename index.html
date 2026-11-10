@@ -692,6 +692,16 @@ function go(view, extra = {}) {
 }
 
 /* ================= Tab bar ================= */
+// Place a freshly drawn selection highlight: it starts where it was last time (no animation from the edge),
+// and slides only if the selection actually moved
+function slideTo(el, prev, r) {
+  const from = prev && (prev.x !== r.x || prev.w !== r.w) && !reduceMotion() ? prev : r;
+  el.style.transition = 'none';
+  el.style.width = from.w + 'px'; el.style.transform = `translateX(${from.x}px)`;
+  void el.offsetWidth;
+  el.style.transition = '';
+  if (from !== r) { el.style.width = r.w + 'px'; el.style.transform = `translateX(${r.x}px)`; }
+}
 // Segmented controls: the selected "thumb" slides to its new place (remembered between renders)
 const segPos = {};
 function animateSegs(root = app) {
@@ -701,12 +711,8 @@ function animateSegs(root = app) {
     let th = seg.querySelector('.seg-thumb');
     if (!th) { th = document.createElement('span'); th.className = 'seg-thumb'; th.setAttribute('aria-hidden', 'true'); seg.prepend(th); }
     seg.classList.add('has-thumb');
-    const r = { x: on.offsetLeft, w: on.offsetWidth }, prev = segPos[key];
-    if (prev && (prev.x !== r.x || prev.w !== r.w) && !reduceMotion()) {
-      th.style.transition = 'none'; th.style.width = prev.w + 'px'; th.style.transform = `translateX(${prev.x}px)`;
-      void th.offsetWidth; th.style.transition = '';
-    }
-    th.style.width = r.w + 'px'; th.style.transform = `translateX(${r.x}px)`;
+    const r = { x: on.offsetLeft, w: on.offsetWidth };
+    if (!th.style.transform || segPos[key]) slideTo(th, segPos[key], r);
     segPos[key] = r;
   });
 }
@@ -735,11 +741,7 @@ function renderDock() {
     const ind = document.createElement('span'); ind.className = 'dock-ind'; ind.setAttribute('aria-hidden', 'true');
     dock.prepend(ind); dock.classList.add('has-ind');
     const r = { x: on.offsetLeft, w: on.offsetWidth };
-    if (dockPos && dockPos.x !== r.x && !reduceMotion()) {
-      ind.style.transition = 'none'; ind.style.width = dockPos.w + 'px'; ind.style.transform = `translateX(${dockPos.x}px)`;
-      void ind.offsetWidth; ind.style.transition = '';
-    }
-    ind.style.width = r.w + 'px'; ind.style.transform = `translateX(${r.x}px)`;
+    slideTo(ind, dockPos, r);
     dockPos = r;
   }
   dock.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
@@ -2341,7 +2343,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.20';
+const APP_VERSION = '0.20.1';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
