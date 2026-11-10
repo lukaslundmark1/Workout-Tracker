@@ -300,8 +300,6 @@
   .pdot::after { content: ""; width: 7px; height: 7px; border-radius: 4px; background: var(--label3); transition: width .25s, background .25s; }
   .pdot.on::after { width: 18px; background: var(--label); }
   .pdot.on { width: 26px; }
-  .pdot.end::after { background: transparent; box-shadow: inset 0 0 0 1.5px var(--label3); }
-  .pdot.end.on::after { background: var(--label); box-shadow: none; }
 
   /* End-of-workout page */
   .finish { display: flex; flex-direction: column; align-items: stretch; padding-top: 8vh; }
@@ -677,8 +675,12 @@ function makeSortable(list, onMove) {
 }
 
 /* ================= TODAY: day view ================= */
-function weekLabel(ws) {
+function weekLabel(ws, short) {
   const we = addDays(ws, 6);
+  // When the Today button takes up room in the header, long month names are shortened so nothing gets cut off.
+  if (short) return ws.getMonth() === we.getMonth()
+    ? `${monthName(ws).slice(0, 3)}${ws.getFullYear() !== new Date().getFullYear() ? ` <span class="yr">${ws.getFullYear()}</span>` : ''}`
+    : `${monthName(ws).slice(0, 3)}–${monthName(we).slice(0, 3)}`;
   const thisYear = new Date().getFullYear();
   const yr = y => y === thisYear ? '' : ` <span class="yr">${y}</span>`;
   if (ws.getMonth() === we.getMonth()) return `${monthName(ws)}${yr(ws.getFullYear())}`;
@@ -713,7 +715,7 @@ function renderDay() {
 
   app.innerHTML = `
     <header class="weekhead">
-      <span class="title">${weekLabel(state.weekStart)}</span>
+      <span class="title">${weekLabel(state.weekStart, showToday && monthName(state.weekStart).length > 5)}</span>
       <span class="spacer"></span>
       ${showToday ? '<button class="capsule glass" id="today">Today</button>' : ''}
       <span class="pair glass"><button id="prevW" aria-label="Previous week">${ICON_PREV}</button><button id="nextW" aria-label="Next week">${ICON_NEXT}</button></span>
@@ -721,10 +723,11 @@ function renderDay() {
     </header>
     <div class="week-wrap" id="weekWrap"><div class="week-track" id="weekTrack">${weekHTML(state.weekStart)}</div></div>
     <div class="day-title">${fmtLong(state.selected)}</div>
-    <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ' (moved)'}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
+    <div class="day-sub">${day.items.length && day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : day.items.length ? 'Custom workout'
+      : pd ? 'Rest day' : state.selected < tk ? 'Nothing logged' : 'No workout planned'}${day.items.length && state.selected < tk && !logged.has(state.selected) && !day.session ? ' · not trained' : ''}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ' (moved)'}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
     ${canMove ? `<button class="capsule glass move-btn" id="moveDay">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 16, 2.2)} Move to tomorrow</button>` : ''}
     ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
-    ${day.items.length && !isFinished(state.selected) && (logged.has(state.selected) || (day.session && day.session.start)) ? `<button class="primary" id="finishDay">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
+    ${day.items.length && canFinish(state.selected) ? `<button class="primary" id="finishDay">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
     <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
 
   const shift = n => { state.weekStart = addDays(state.weekStart, 7 * n); render(); };
@@ -745,7 +748,7 @@ function renderDay() {
     d.items = d.items.filter(i => i.exId !== exId);
     data.sets = data.sets.filter(x => !(x.exId === exId && x.date === k));
     delete state.drafts[exId + '|' + k];
-    if (!d.items.length && !d.plan) delete data.days[k];   // an emptied planned day stays (as empty) so the plan doesn't refill it
+    if (!d.items.length) { d.workouts = []; if (!d.plan && !d.session) delete data.days[k]; }   // an emptied planned day stays (empty) so the plan doesn't refill it
     save(); state.pending = null; render();
   });
   if ($('dayList')) makeSortable($('dayList'), (from, to) => {
@@ -824,7 +827,7 @@ function logBodyHTML(m) {
       <span>${plural(n, 'set')}</span>
       <button id="plus" aria-label="Add a set">+</button>
     </div>
-    ${!isFinished(state.selected) && (m.idx === m.total - 1 || setsLeft(state.selected) === 0)
+    ${(canFinish(state.selected) || (state.selected === todayKey() && !isFinished(state.selected))) && (m.idx === m.total - 1 || setsLeft(state.selected) === 0)
       ? `<button class="primary finish-btn" id="finishHere">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
     ${m.idx === m.total - 1 ? `<button class="btn-tinted" id="addMore" ${isFinished(state.selected) ? 'style="margin-top:22px"' : ''}>${ICON_PLUS} Add exercise</button>` : ''}`;
 }
@@ -913,7 +916,7 @@ function renderLog() {
       delete drafts[i];
       if (i + 1 > (item.sets || 0)) item.sets = i + 1;
       const d = ensureDay(k);
-      if (!d.session) d.session = { start: Date.now() }; // first logged set starts the timer
+      if (!d.session && k === todayKey()) d.session = { start: Date.now() }; // first set logged today starts the timer
       changed();
     };
   });
@@ -992,14 +995,16 @@ const fmtDur = ms => {
 const fmtMins = ms => { const m = Math.round(ms / 60000), h = Math.floor(m / 60); return h ? `${h} h ${m % 60} min` : `${m} min`; };
 const setsLeft = k => dayOf(k).items.reduce((a, it) => a + Math.max(0, (it.sets || 0) - setsFor(it.exId, k).length), 0);
 
-// The timer runs until "Finish workout" (end page or tapping the running timer).
+// The timer runs until "Finish workout" (button, or tapping the running timer).
 function timerHTML(k) {
   const s = dayOf(k).session;
+  if (!s && k !== todayKey()) return '';   // no timer when filling in another day
   if (!s) return `<button class="capsule glass timer" id="timer" aria-label="Start session timer">${ICON_TIMER}<span>Start</span></button>`;
   if (s.end) return `<button class="capsule glass timer ended" id="timer" aria-label="Workout finished, tap to change duration">${ICON_OK}<span>${fmtMins(s.end - s.start)}</span></button>`;
   return `<button class="capsule glass timer running" id="timer" aria-label="Session time, tap to finish"><span class="rec"></span><span id="timerText">${fmtDur(Date.now() - s.start)}</span></button>`;
 }
 function wireTimer(k) {
+  if (!$('timer')) return;
   $('timer').onclick = () => {
     const day = ensureDay(k);
     const s = day.session;
@@ -1028,6 +1033,10 @@ function untickedSets(k) {
   return out;
 }
 const isFinished = k => { const s = dayOf(k).session; return !!(s && s.end); };
+const isRunning = k => { const s = dayOf(k).session; return !!(s && s.start && !s.end); };
+// Finish workout is offered for a workout that's running, or for today once something is logged.
+// (Past days you're just filling in afterwards don't get a timer or a Finish button.)
+const canFinish = k => !isFinished(k) && (isRunning(k) || (k === todayKey() && data.sets.some(x => x.date === k)));
 const openFinish = k => openSheet({ type: 'duration', k });
 function sheetDuration(el) {
   const st = state.sheet, k = st.k;
@@ -1084,7 +1093,8 @@ function renderPicker() {
   const mode = state.pickerMode;
   app.innerHTML = `
     <header class="nav">${backBtn(fmtShort(state.selected))}</header>
-    <div class="large-title">Add</div>
+    <div class="eyebrow">${fmtLong(state.selected)}</div>
+    <div class="large-title">Add to workout</div>
     <div class="seg"><button data-m="workouts" class="${mode === 'workouts' ? 'on' : ''}">Workouts</button><button data-m="exercises" class="${mode === 'exercises' ? 'on' : ''}">Exercises</button></div>
     ${mode === 'exercises' ? searchHTML('q', 'Search exercises') : ''}
     <div id="results"></div>`;
@@ -1128,7 +1138,7 @@ function addWorkoutToDay(wId) {
   const w = woById(wId); if (!w) return;
   const day = ensureDay(state.selected);
   w.items.forEach(it => { if (!day.items.some(i => i.exId === it.exId)) day.items.push({ exId: it.exId, sets: it.sets }); });
-  day.workouts.push({ id: w.id, name: w.name });
+  if (!day.workouts.some(x => x.id === w.id)) day.workouts.push({ id: w.id, name: w.name });
   save(); go('day');
 }
 
@@ -1220,6 +1230,7 @@ function renderHistory() {
   if (!ex) return go('day');
   app.innerHTML = `
     <header class="nav">${backBtn(ex.name)}</header>
+    <div class="eyebrow">${esc(ex.name)}</div>
     <div class="large-title">History</div>
     ${progressHTML(ex.id)}
     ${historyHTML(ex.id)}`;
@@ -1494,7 +1505,7 @@ function sheetPlanDay(el) {
     </div>
     <div class="section">Workouts</div>
     ${list.length ? `<div class="group">${list.map(w => `<button class="cell" data-w="${w.id}"><span class="main"><div>${esc(w.name)}</div><div class="sub">${plural(w.items.length, 'exercise')}</div></span>${cur && cur.workoutId === w.id ? `<span class="chev" style="color:var(--tint)">${ICON_OK}</span>` : ''}</button>`).join('')}</div>`
-      : '<div class="group"><div class="empty">No workouts yet. Create some in the Workouts list first.</div></div>'}`);
+      : '<div class="group"><div class="empty">No workouts yet. Switch to Workouts at the top of this tab and create some first.</div></div>'}`);
   $('sCancel').onclick = () => closeSheet();
   el.querySelectorAll('[data-w]').forEach(b => b.onclick = () => {
     const v = { workoutId: b.dataset.w || null };
@@ -1575,6 +1586,7 @@ function renderWorkoutList() {
 function renderWorkoutEdit() {
   const dr = state.draft;
   if (!dr) return go('wList');
+  const usedIn = dr.id ? data.plans.filter(p => p.days.some(d => d.workoutId === dr.id)) : [];
   const rows = dr.items.map((it, i) => {
     const ex = exById(it.exId);
     return `<div class="cell-wrap drag-row" style="display:flex;align-items:center">
@@ -1589,7 +1601,8 @@ function renderWorkoutEdit() {
     <div class="section">Exercises</div>
     <div class="group"><div id="wList">${rows}</div><div class="cell-wrap"><button class="cell action" id="addToW">${plusLead}Add exercise</button></div></div>
     <div class="err" id="wErr"></div>
-    ${dr.id ? `<div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'delW' ? 'confirm' : ''}" id="delW">${state.pending === 'delW' ? 'Tap again to delete' : 'Delete Workout'}</button></div>` : ''}`;
+    ${dr.id ? `<div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'delW' ? 'confirm' : ''}" id="delW">${state.pending === 'delW' ? 'Tap again to delete' : 'Delete Workout'}</button></div>
+      ${state.pending === 'delW' && usedIn.length ? `<div class="footnote" style="color:var(--red)">Used in ${usedIn.map(p => esc(p.name)).join(', ')}. Those days will become rest days.</div>` : ''}` : ''}`;
   const name = $('wName');
   name.value = dr.name;
   name.oninput = () => { dr.name = name.value; };
@@ -1816,7 +1829,7 @@ function sheetSignin(el) {
   s.mode = s.mode || 'signin';
   const create = s.mode === 'create';
   el.innerHTML = sheetOpen('Sign in', `${closeBtn('sCancel')}<b>${create ? 'Create account' : 'Sign in'}</b><span></span>`, `
-    <div class="finish-sub" style="margin:0 8px 14px">Back up your workouts and use them on all your devices. Friends come next.</div>
+    <div class="finish-sub" style="margin:0 8px 14px">Back up your workouts, use them on all your devices, and add friends.</div>
     <button class="google-btn" id="gBtn">${ICON_GOOGLE}<span>Continue with Google</span></button>
     <div class="or"><span>or use email</span></div>
     <div class="group">
@@ -1867,7 +1880,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.14.1';
+const APP_VERSION = '0.15';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -1988,7 +2001,6 @@ function renderSettings() {
 const friends = { links: [], unsub: null, cache: {}, exCache: {}, error: '', nameTimer: null };
 const pairId = (a, b) => (a < b ? a + '_' + b : b + '_' + a);
 const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const newCode = () => Array.from({ length: 6 }, () => CODE_ABC[Math.floor(Math.random() * CODE_ABC.length)]).join('');
 const fmtCode = c => (c ? c.slice(0, 3) + '-' + c.slice(3) : '');
 const cleanCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
 const myName = () => (data.settings.name || '').trim() || (cloud.user && (cloud.user.displayName || (cloud.user.email || '').split('@')[0])) || 'Someone';
@@ -2091,7 +2103,7 @@ async function loadFriend(uid, force) {
 }
 async function loadFriendExercise(uid, exId) {
   const key = uid + '|' + exId;
-  if (friends.exCache[key] && Date.now() - friends.exCache[key].at < 5 * 60 * 1000) return friends.exCache[key].sets;
+  if (friends.exCache[key] && Date.now() - friends.exCache[key].at < 60 * 1000) return friends.exCache[key].sets;
   const fb = cloud.fb;
   const snap = await fb.getDocs(fb.query(fb.collection(cloud.db, 'users', uid, 'sets'), fb.where('exId', '==', exId)));
   const sets = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(x => !x.deleted);
@@ -2183,7 +2195,7 @@ function renderFriend() {
       ${dates.length ? dates.slice(0, 12).map(k => {
         const ss = c.sets.filter(s => s.date === k), d = c.days[k];
         const byEx = [...new Set(ss.map(s => s.exId))];
-        const title = d && d.workouts && d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Workout';
+        const title = d && d.workouts && d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Custom workout';
         const dur = d && d.session ? (d.session.end ? ` · ${fmtMins(d.session.end - d.session.start)}` : ' · <span style="color:var(--green)">in progress</span>') : '';
         return `<div class="hcard"><div class="hcard-head"><b>${title}</b><span>${fmtDayYear(k)}${dur}</span></div>
           ${byEx.length ? byEx.map(id => `<div class="hset"><span class="fx">${esc(exName(id))}</span><span class="v">${ss.filter(s => s.exId === id).sort((a, b) => a.slot - b.slot).map(s => `${W(s.weight)}×${s.reps}`).join(', ')}</span></div>`).join('')
@@ -2447,7 +2459,11 @@ function sheetExForm(el) {
     data.exercises = data.exercises.filter(e => e.id !== ex.id);
     data.sets = data.sets.filter(x => x.exId !== ex.id);
     data.workouts.forEach(w => { w.items = w.items.filter(i => i.exId !== ex.id); });
-    for (const k in data.days) { data.days[k].items = data.days[k].items.filter(i => i.exId !== ex.id); if (!data.days[k].items.length) delete data.days[k]; }
+    for (const k in data.days) {
+      const d = data.days[k];
+      d.items = d.items.filter(i => i.exId !== ex.id);
+      if (!d.items.length) { d.workouts = []; if (!d.plan && !d.session) delete data.days[k]; }
+    }
     if (state.draft) state.draft.items = state.draft.items.filter(i => i.exId !== ex.id);
     save(); state.sheet = null; go('eList');
   };
@@ -2510,6 +2526,20 @@ if (/^#add-/i.test(location.hash)) {
   state.tab = 'friends';
   try { history.replaceState(null, '', location.pathname); } catch (e) {}
 }
+// A workout left running on an earlier day (forgot to press Finish) is closed at its last logged set,
+// so it doesn't stay "In progress" forever.
+function closeStaleSessions() {
+  const tk = todayKey(); let changed = false;
+  for (const k in data.days) {
+    const s = data.days[k].session;
+    if (!s || s.end || k >= tk) continue;
+    const ts = data.sets.filter(x => x.date === k).map(x => x.ts);
+    if (ts.length) s.end = Math.max(s.start + 60000, ...ts); else delete data.days[k].session;
+    changed = true;
+  }
+  if (changed) save();
+}
+closeStaleSessions();
 applyTheme();
 render();
 initCloud();
