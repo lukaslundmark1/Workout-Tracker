@@ -1,5 +1,5 @@
 // Bump this when you deploy a new version so old caches are cleared.
-const CACHE = 'tt-v13';
+const CACHE = 'tt-v14';
 const ASSETS = [
   './',
   './index.html',
@@ -7,11 +7,12 @@ const ASSETS = [
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
-  './firebase.js',
+  './firebase-20631876.js',
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+  // cache: 'reload' skips the browser's HTTP cache so an update never stores stale files
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' })))));
   self.skipWaiting();
 });
 
@@ -29,7 +30,7 @@ self.addEventListener('fetch', e => {
   // Pages: try the network first so updates show up, fall back to cache offline.
   if (req.mode === 'navigate') {
     e.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' }) // always check for a newer version of the app
         .then(res => { const copy = res.clone(); caches.open(CACHE).then(c => c.put('./index.html', copy)); return res; })
         .catch(() => caches.match('./index.html'))
     );
