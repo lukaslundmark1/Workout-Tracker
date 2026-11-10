@@ -1810,6 +1810,8 @@ function virtualDay(k) {
   return { items: pd.workout.items.filter(i => exById(i.exId)).map(i => ({ exId: i.exId, sets: i.sets })),
            workouts: [{ id: pd.workout.id, name: pd.workout.name }], plan: { id: pd.plan.id, index: pd.index } };
 }
+const planDayLabel = (plan, i) => { const w = woById(plan.days[i].workoutId); return w ? w.name : 'Rest'; };
+const planSummary = p => `${p.days.length}-day rotation · ${plural(p.days.filter(d => woById(d.workoutId)).length, 'workout')} · ${p.weeks ? plural(p.weeks, 'week') : 'ongoing'}`;
 // Where a plan workout lands from a date on (for feedback after moving things)
 function whereIs(index, from) {
   const sc = planSchedule();
@@ -2359,7 +2361,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.21';
+const APP_VERSION = '0.21.1';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
