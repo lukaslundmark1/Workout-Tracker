@@ -18,7 +18,7 @@
     --bg: #f2f2f7; --card: #fff; --card2: #f2f2f7; --label: #000; --label2: rgba(60,60,67,.6); --label3: rgba(60,60,67,.3);
     --sep: rgba(60,60,67,.15); --fill: rgba(118,118,128,.12); --fill2: rgba(118,118,128,.2); --pressed: rgba(0,0,0,.05);
     --tint: #007aff; --tint-soft: rgba(0,122,255,.12); --red: #ff3b30; --red-soft: rgba(255,59,48,.12); --green: #34c759; --green-soft: rgba(52,199,89,.12);
-    --on-tint: #fff; --seg-on: #fff; --grid: rgba(60,60,67,.12);
+    --on-tint: #fff; --fill-faint: rgba(118,118,128,.06); --seg-on: #fff; --grid: rgba(60,60,67,.12);
     --glass: rgba(255,255,255,.72); --glass-edge: rgba(255,255,255,.9);
     --glass-shadow: 0 10px 30px rgba(0,0,0,.10), 0 2px 6px rgba(0,0,0,.06);
     --backdrop: rgba(0,0,0,.25);
@@ -30,7 +30,7 @@
       --bg: #000; --card: #1c1c1e; --card2: #2c2c2e; --label: #fff; --label2: rgba(235,235,245,.6); --label3: rgba(235,235,245,.3);
       --sep: rgba(84,84,88,.55); --fill: rgba(118,118,128,.24); --fill2: rgba(118,118,128,.32); --pressed: rgba(255,255,255,.06);
       --tint: #0a84ff; --tint-soft: rgba(10,132,255,.2); --red: #ff453a; --red-soft: rgba(255,69,58,.2); --green: #30d158; --green-soft: rgba(48,209,88,.16);
-      --seg-on: #636366; --grid: rgba(235,235,245,.12);
+      --seg-on: #636366; --fill-faint: rgba(118,118,128,.12); --grid: rgba(235,235,245,.12);
       --glass: rgba(37,37,40,.68); --glass-edge: rgba(255,255,255,.12);
       --glass-shadow: 0 10px 30px rgba(0,0,0,.5), 0 2px 6px rgba(0,0,0,.3);
       --backdrop: rgba(0,0,0,.5);
@@ -145,14 +145,11 @@
   .setrow { min-height: 60px; position: relative; transition: background .2s; }
   .setrow + .setrow::before { content: ""; position: absolute; top: 0; left: 18px; right: 18px; border-top: .5px solid var(--sep); }
   .setrow .sn { font-family: var(--rounded); font-weight: 700; color: var(--label3); font-size: 17px; }
-  .setrow input { font-family: var(--rounded); width: 100%; height: 42px; border: 0; border-radius: 14px; background: var(--fill); text-align: center; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--label3); outline: none; padding: 0 4px; transition: background .2s, color .2s; }
+  .setrow input { font-family: var(--rounded); width: 100%; height: 42px; border: 0; border-radius: 14px; background: var(--fill-faint); text-align: center; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--label3); outline: none; padding: 0 4px; transition: background .2s, color .2s; }
   .setrow input:focus { box-shadow: 0 0 0 2px var(--tint) inset; color: var(--label); }
   .setrow input.bad { box-shadow: 0 0 0 2px var(--red) inset; }
-  .setrow.done { background: var(--green-soft); }
-  .setrow.done + .setrow.done::before { border-color: transparent; }
-  .setrow.done .sn { color: var(--green); }
-  .setrow.done input { color: var(--label); background: transparent; }
-  .setrow.done input:focus { background: var(--fill); }
+  .setrow.done .sn { color: var(--label); }
+  .setrow.done input { color: var(--label); background: var(--fill); }
   .check { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; }
   .check .ring { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--label3); display: flex; align-items: center; justify-content: center; transition: all .2s cubic-bezier(.3,1.5,.6,1); }
   .setrow.done .check .ring { background: var(--green); border-color: var(--green); color: #fff; transform: scale(1.05); }
@@ -275,6 +272,25 @@
   @keyframes recede { to { transform: scale(.94); opacity: .5; } }
   @keyframes leaveDown { to { transform: translateY(100vh); } }
   @keyframes under { from { transform: scale(.94); opacity: .5; } }
+
+  /* Swiping */
+  #app { overflow-x: clip; }
+  .swipe-area { min-height: calc(100vh - 56px - env(safe-area-inset-top)); }
+  .pager, .week-track { position: relative; will-change: transform; }
+  .peek { position: absolute; width: 100%; pointer-events: none; }
+  .slide-wrap, .peek { display: flow-root; }
+  .week-wrap { margin: 6px 0 22px; touch-action: pan-y; }
+  .week-wrap .week { margin: 0; }
+  body:has(.pdots) #app { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+
+  /* Page dots */
+  .pdots { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 2px; padding: 0 8px; height: 28px; border-radius: 14px; z-index: 9; }
+  .pdot { width: 16px; height: 28px; display: flex; align-items: center; justify-content: center; }
+  .pdot::after { content: ""; width: 7px; height: 7px; border-radius: 4px; background: var(--label3); transition: width .25s, background .25s; }
+  .pdot.on::after { width: 18px; background: var(--label); }
+  .pdot.on { width: 26px; }
+  .pdot.end::after { background: transparent; box-shadow: inset 0 0 0 1.5px var(--label3); }
+  .pdot.end.on::after { background: var(--label); box-shadow: none; }
 
   /* End-of-workout page */
   .finish { display: flex; flex-direction: column; align-items: stretch; padding-top: 8vh; }
@@ -404,7 +420,9 @@ const ICON_OK = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 20, 2.6);
 const ICON_PLUS = svg('<path d="M12 5v14M5 12h14"/>', 16, 2.6);
 const ICON_PREV = svg('<path d="M15 5l-7 7 7 7"/>', 18, 2.4);
 const ICON_NEXT = svg('<path d="M9 5l7 7-7 7"/>', 18, 2.4);
-const backBtn = label => `<button class="circle glass" id="back" aria-label="Back to ${esc(label)}">${ICON_BACK}</button>`;
+const ICON_DOWN = svg('<path d="M5 9l7 7 7-7"/>', 22, 2.4);
+// Every screen that has a back button slides down when you go back, so the button points down
+const backBtn = label => `<button class="circle glass" id="back" aria-label="Back to ${esc(label)}">${ICON_DOWN}</button>`;
 const closeBtn = (id, label = 'Cancel') => `<button class="circle glass" id="${id}" aria-label="${label}">${ICON_X}</button>`;
 const okBtn = (id, label = 'Save') => `<button class="circle prominent" id="${id}" aria-label="${label}">${ICON_OK}</button>`;
 const plusLead = `<span class="plus">${ICON_PLUS}</span>`;
@@ -573,11 +591,11 @@ function renderDay() {
   const logged = loggedDays();
   const tk = todayKey();
   const showToday = dk(state.weekStart) !== dk(startOfWeek(new Date())) || state.selected !== tk;
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const k = dk(addDays(state.weekStart, i));
+  const weekHTML = ws => `<div class="week">${Array.from({ length: 7 }, (_, i) => {
+    const k = dk(addDays(ws, i));
     const cls = ['day', k === tk && 'today', k === state.selected && 'sel'].filter(Boolean).join(' ');
     return `<button class="${cls}" data-k="${k}"><span class="wd">${WD[i]}</span><span class="num">${parse(k).getDate()}</span><span class="dot ${logged.has(k) ? 'on' : ''}"></span></button>`;
-  }).join('');
+  }).join('')}</div>`;
 
   const day = dayOf(state.selected);
   const rows = day.items.map(it => {
@@ -601,7 +619,7 @@ function renderDay() {
       <span class="pair glass"><button id="prevW" aria-label="Previous week">${ICON_PREV}</button><button id="nextW" aria-label="Next week">${ICON_NEXT}</button></span>
       <button class="circle glass" id="calBtn" aria-label="Calendar">${ICON_CAL}</button>
     </header>
-    <div class="week" id="week">${days}</div>
+    <div class="week-wrap" id="weekWrap"><div class="week-track" id="weekTrack">${weekHTML(state.weekStart)}</div></div>
     <div class="day-title">${fmtLong(state.selected)}</div>
     <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
     ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
@@ -632,24 +650,18 @@ function renderDay() {
     save(); render();
   });
 
-  const wk = $('week');
-  let x0 = null;
-  wk.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
-  wk.addEventListener('touchend', e => {
-    if (x0 === null) return;
-    const dx = e.changedTouches[0].clientX - x0; x0 = null;
-    if (Math.abs(dx) > 50) shift(dx < 0 ? 1 : -1);
+  swipePager($('weekWrap'), $('weekTrack'), {
+    peek: dir => weekHTML(addDays(state.weekStart, 7 * dir)),
+    commit: dir => shift(dir),
   });
 }
 
 /* ================= TODAY: log sets ================= */
-function renderLog() {
-  const ex = exById(state.logExId);
-  const k = state.selected;
+function logModel(k, idx) {
   const day = dayOf(k);
-  const idx = ex ? day.items.findIndex(i => i.exId === ex.id) : -1;
   const item = day.items[idx];
-  if (!ex || !item) return go('day');
+  const ex = item && exById(item.exId);
+  if (!ex) return null;
   const today = setsFor(ex.id, k);
   const bySlot = {};
   today.forEach(s => { bySlot[s.slot] = s; });
@@ -657,24 +669,27 @@ function renderLog() {
   const n = Math.max(item.sets || 0, maxSlot + 1);
   const dkey = ex.id + '|' + k;
   const drafts = (state.drafts[dkey] = state.drafts[dkey] || {});
-
   const prevDates = [...new Set(data.sets.filter(s => s.exId === ex.id && s.date < k).map(s => s.date))].sort();
   const prevK = prevDates[prevDates.length - 1];
   const prevSets = prevK ? setsFor(ex.id, prevK) : [];
+  return { day, item, ex, today, bySlot, n, dkey, drafts, prevK, prevSets, idx, total: day.items.length };
+}
 
-  // Suggested values for a row that isn't done yet:
-  // what you typed → the closest finished set above it today → same set last time → last set last time
-  const suggest = i => {
-    if (drafts[i]) return drafts[i];
-    for (let j = i - 1; j >= 0; j--) if (bySlot[j]) return { w: fmtW(bySlot[j].weight), r: String(bySlot[j].reps) };
-    const p = prevSets[i] || prevSets[prevSets.length - 1];
-    return p ? { w: fmtW(p.weight), r: String(p.reps) } : { w: '', r: '' };
-  };
+// Suggested values for a row that isn't done yet:
+// what you typed → the closest finished set above it today → same set last time → last set last time
+function suggest(m, i) {
+  if (m.drafts[i]) return m.drafts[i];
+  for (let j = i - 1; j >= 0; j--) if (m.bySlot[j]) return { w: fmtW(m.bySlot[j].weight), r: String(m.bySlot[j].reps) };
+  const p = m.prevSets[i] || m.prevSets[m.prevSets.length - 1];
+  return p ? { w: fmtW(p.weight), r: String(p.reps) } : { w: '', r: '' };
+}
 
+function logBodyHTML(m) {
+  const { ex, bySlot, n, prevK, prevSets } = m;
   let rows = '';
   for (let i = 0; i < n; i++) {
     const s = bySlot[i];
-    const v = s ? { w: fmtW(s.weight), r: String(s.reps) } : suggest(i);
+    const v = s ? { w: fmtW(s.weight), r: String(s.reps) } : suggest(m, i);
     rows += `<div class="setrow ${s ? 'done' : ''}" data-i="${i}">
       <span class="sn">${i + 1}</span>
       <input class="w" inputmode="decimal" autocomplete="off" aria-label="Set ${i + 1} weight in kg" value="${esc(v.w)}" placeholder="kg">
@@ -684,19 +699,15 @@ function renderLog() {
   }
   const canMinus = n > 0 && !bySlot[n - 1];
   const vid = ytId(ex.video);
-  const hasInstr = ex.instructions || vid;
-
-  app.innerHTML = `
-    <header class="nav">${backBtn(fmtShort(k))}<span class="spacer"></span>${timerHTML(k)}</header>
-    <div class="slide-wrap ${state.slide ? 'from-' + state.slide : ''}">
-    <div class="eyebrow">Exercise ${idx + 1} of ${day.items.length}</div>
+  return `
+    <div class="eyebrow">Exercise ${m.idx + 1} of ${m.total}</div>
     <div class="large-title">${esc(ex.name)}</div>
     <button class="lastbar" id="history">
       <span class="main"><span class="lb-label">${prevK ? `Last time · ${fmtShort(prevK)}` : 'Last time'}</span>
       <span class="lb-sets">${prevK ? prevSets.map(s => `<span style="white-space:nowrap">${fmtW(s.weight)} kg × ${s.reps}</span>`).join(', ') : 'No earlier sessions'}</span></span>
       <span class="lb-more">History <span class="chev">${ICON_CHEV}</span></span>
     </button>
-    ${hasInstr ? `<details class="instr"><summary>Instructions</summary>
+    ${ex.instructions || vid ? `<details class="instr"><summary>Instructions</summary>
       ${ex.instructions ? `<div class="instr-text">${esc(ex.instructions)}</div>` : ''}
       ${vid ? `<a href="https://www.youtube.com/watch?v=${vid}" target="_blank" rel="noopener">Watch video on YouTube ↗</a>` : ''}
     </details>` : ''}
@@ -708,27 +719,75 @@ function renderLog() {
       <button id="minus" aria-label="Remove a set" ${canMinus ? '' : 'disabled'}>−</button>
       <span>${plural(n, 'set')}</span>
       <button id="plus" aria-label="Add a set">+</button>
-    </div>
-    </div>
-`;
+    </div>`;
+}
+
+function finishBodyHTML(k) {
+  const s = dayOf(k).session;
+  const left = setsLeft(k);
+  const done = s && s.end;
+  return `
+    <div class="finish">
+      <div class="finish-icon ${done ? 'done' : ''}">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 44, 2.6)}</div>
+      <div class="large-title" style="text-align:center;margin-bottom:6px">${done ? 'Workout finished' : 'End of workout'}</div>
+      <div class="finish-sub">${done ? `Finished in ${fmtMins(s.end - s.start)}` : left ? `${plural(left, 'planned set')} not logged yet` : 'Every planned set is logged'}</div>
+      ${done ? `<button class="primary" id="editDur">Change duration</button>` : `<button class="primary" id="finishW">Finish workout</button>`}
+      <button class="btn-tinted" id="addMore">${ICON_PLUS} Add exercise</button>
+    </div>`;
+}
+
+// Page dots: one per exercise plus the end page. Tap one to jump there.
+function dotsHTML(k, current) {
+  const items = dayOf(k).items;
+  const dots = items.map((it, i) => `<button class="pdot ${i === current ? 'on' : ''}" data-page="${i}" aria-label="Exercise ${i + 1}"></button>`).join('');
+  return `<div class="pdots glass" role="tablist">${dots}<button class="pdot end ${current === items.length ? 'on' : ''}" data-page="${items.length}" aria-label="End of workout"></button></div>`;
+}
+// Page index i: 0..items-1 = exercises, items.length = end page
+function pageHTML(k, i) {
+  const items = dayOf(k).items;
+  if (i < 0 || i > items.length) return null;
+  return i === items.length ? finishBodyHTML(k) : logBodyHTML(logModel(k, i));
+}
+function goPage(k, i, slide) {
+  const items = dayOf(k).items;
+  if (i < 0 || i > items.length) return;
+  if (i === items.length) go('finish', { slide });
+  else go('log', { logExId: items[i].exId, slide });
+}
+function pagerShell(k, i, body) {
+  return `
+    <header class="nav">${backBtn(fmtShort(k))}<span class="spacer"></span>${timerHTML(k)}</header>
+    <div class="swipe-area" id="swipeArea"><div class="pager" id="pager"><div class="slide-wrap ${state.slide ? 'from-' + state.slide : ''}">${body}</div></div></div>
+    ${dotsHTML(k, i)}`;
+}
+function wirePager(k, i) {
   state.slide = null;
-
-  // Swiping past the last exercise opens the end-of-workout page
-  const goTo = (j, dir) => {
-    if (j < 0) return;
-    if (j >= day.items.length) return go('finish', { slide: 'right' });
-    go('log', { logExId: day.items[j].exId, slide: dir });
-  };
   $('back').onclick = () => go('day');
-  $('history').onclick = () => go('history', { stat: 'e1rm' });
   wireTimer(k);
+  app.querySelectorAll('[data-page]').forEach(b => b.onclick = () => { const j = Number(b.dataset.page); if (j !== i) goPage(k, j, j > i ? 'right' : 'left'); });
+  const pager = $('pager');
+  swipePager($('swipeArea'), pager, {
+    peek: dir => pageHTML(k, i + dir),
+    peekTop: () => Math.max(0, -pager.getBoundingClientRect().top + 56),
+    commit: dir => goPage(k, i + dir, null),
+  });
+}
+
+function renderLog() {
+  const k = state.selected;
+  const idx = dayOf(k).items.findIndex(it => it.exId === state.logExId);
+  const m = idx >= 0 && logModel(k, idx);
+  if (!m) return go('day');
+  const { ex, item, bySlot, n, drafts } = m;
+  app.innerHTML = pagerShell(k, idx, logBodyHTML(m));
+  wirePager(k, idx);
+
   const changed = () => { save(); state.pending = null; render(); };
+  $('history').onclick = () => go('history', { stat: 'e1rm' });
   $('plus').onclick = () => { item.sets = n + 1; changed(); };
-  $('minus').onclick = () => { if (!canMinus) return; item.sets = n - 1; delete drafts[n - 1]; changed(); };
+  $('minus').onclick = () => { if (!(n > 0 && !bySlot[n - 1])) return; item.sets = n - 1; delete drafts[n - 1]; changed(); };
 
-  onSwipe(() => goTo(idx + 1, 'right'), () => goTo(idx - 1, 'left'));
-
-  app.querySelectorAll('.setrow').forEach(row => {
+  app.querySelectorAll('#pager .setrow').forEach(row => {
     const i = Number(row.dataset.i);
     const wIn = row.querySelector('.w'), rIn = row.querySelector('.r');
     const done = bySlot[i];
@@ -758,11 +817,75 @@ function renderLog() {
       data.sets.push({ id: uid(), exId: ex.id, date: k, slot: i, weight: w, reps: r, ts: Date.now() });
       delete drafts[i];
       if (i + 1 > (item.sets || 0)) item.sets = i + 1;
-      const s = ensureDay(k);
-      if (!s.session) s.session = { start: Date.now() }; // first logged set starts the timer
+      const d = ensureDay(k);
+      if (!d.session) d.session = { start: Date.now() }; // first logged set starts the timer
       changed();
     };
   });
+}
+
+/* ================= Finger-following swipe ================= */
+// The target moves with your finger (you can pause mid-swipe); the neighbouring page peeks in from the side.
+// Let go past ~30% of the width, or flick, to turn the page; otherwise it springs back.
+function swipePager(surface, target, opts) {
+  let s = null;
+  const ease = 'transform .28s cubic-bezier(.2,.85,.3,1)';
+  const clearPeek = () => { if (s && s.peek) { s.peek.remove(); s.peek = null; } };
+  surface.addEventListener('touchstart', e => {
+    if (e.touches.length > 1 || e.target.closest('input, textarea, .chart, .grip')) { s = null; return; }
+    const t = e.touches[0];
+    s = { x: t.clientX, y: t.clientY, axis: null, dir: 0, dx: 0, peek: null, lx: t.clientX, lt: performance.now(), v: 0 };
+    target.style.transition = 'none';
+  }, { passive: true });
+  surface.addEventListener('touchmove', e => {
+    if (!s) return;
+    const t = e.touches[0];
+    const dx = t.clientX - s.x, dy = t.clientY - s.y;
+    if (!s.axis) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      s.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    }
+    if (s.axis !== 'x') return;
+    e.preventDefault();
+    const now = performance.now();
+    s.v = (t.clientX - s.lx) / Math.max(1, now - s.lt); s.lx = t.clientX; s.lt = now;
+    const dir = dx < 0 ? 1 : -1;
+    if (dir !== s.dir) {
+      s.dir = dir;
+      clearPeek();
+      const html = opts.peek(dir);
+      if (html != null) {
+        const p = document.createElement('div');
+        p.className = 'peek';
+        p.setAttribute('aria-hidden', 'true');
+        p.innerHTML = html;
+        p.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+        p.style.left = dir > 0 ? 'calc(100% + 16px)' : 'calc(-100% - 16px)';
+        p.style.top = (opts.peekTop ? opts.peekTop() : 0) + 'px';
+        target.appendChild(p);
+        s.peek = p;
+      }
+    }
+    s.dx = s.peek ? dx : dx * 0.25; // rubber-band when there's nothing on that side
+    target.style.transform = `translateX(${s.dx}px)`;
+  }, { passive: false });
+  const end = () => {
+    if (!s || s.axis !== 'x') { s = null; return; }
+    const w = target.offsetWidth;
+    const flick = Math.abs(s.v) > 0.45 && Math.sign(-s.v) === s.dir && Math.abs(s.dx) > 50;
+    const st = s;
+    s = null;
+    target.style.transition = ease;
+    if (st.peek && (Math.abs(st.dx) > w * 0.3 || flick)) {
+      target.style.transform = `translateX(${-st.dir * (w + 16)}px)`;
+      setTimeout(() => opts.commit(st.dir), 280);
+    } else {
+      target.style.transform = '';
+      setTimeout(() => { if (st.peek) st.peek.remove(); }, 280);
+    }
+  };
+  surface.addEventListener('touchend', end);
+  surface.addEventListener('touchcancel', end);
 }
 
 /* ================= Session timer ================= */
@@ -793,42 +916,13 @@ function wireTimer(k) {
   if (s && !s.end) timerTick = setInterval(() => { const t = $('timerText'); if (t) t.textContent = fmtDur(Date.now() - s.start); }, 1000);
 }
 
-/* Swipe left/right anywhere on the page (except in a text field) */
-function onSwipe(fwd, back) {
-  let t0 = null;
-  app.ontouchstart = e => { t0 = e.target.closest('input, textarea, .chart, .grip') ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
-  app.ontouchend = e => {
-    if (!t0) return;
-    const dx = e.changedTouches[0].clientX - t0.x, dy = e.changedTouches[0].clientY - t0.y; t0 = null;
-    if (Math.abs(dx) > 60 && Math.abs(dy) < 60) (dx < 0 ? fwd : back)();
-  };
-}
-
 /* ================= TODAY: end-of-workout page (swipe past the last exercise) ================= */
 function renderFinish() {
   const k = state.selected;
   const day = dayOf(k);
   if (!day.items.length) return go('day');
-  const s = day.session;
-  const left = setsLeft(k);
-  const done = s && s.end;
-  app.innerHTML = `
-    <header class="nav">${backBtn(fmtShort(k))}<span class="spacer"></span>${timerHTML(k)}</header>
-    <div class="slide-wrap ${state.slide ? 'from-' + state.slide : ''}">
-      <div class="finish">
-        <div class="finish-icon ${done ? 'done' : ''}">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 44, 2.6)}</div>
-        <div class="large-title" style="text-align:center;margin-bottom:6px">${done ? 'Workout finished' : 'End of workout'}</div>
-        <div class="finish-sub">${done ? `Finished in ${fmtMins(s.end - s.start)}` : left ? `${plural(left, 'planned set')} not logged yet` : 'Every planned set is logged'}</div>
-        ${done ? `<button class="primary" id="editDur">Change duration</button>`
-               : `<button class="primary" id="finishW">Finish workout</button>`}
-        <button class="btn-tinted" id="addMore">${ICON_PLUS} Add exercise</button>
-      </div>
-    </div>`;
-  state.slide = null;
-  $('back').onclick = () => go('day');
-  wireTimer(k);
-  const last = () => go('log', { logExId: day.items[day.items.length - 1].exId, slide: 'left' });
-  onSwipe(() => {}, last);
+  app.innerHTML = pagerShell(k, day.items.length, finishBodyHTML(k));
+  wirePager(k, day.items.length);
   if ($('finishW')) $('finishW').onclick = () => openSheet({ type: 'duration', k });
   if ($('editDur')) $('editDur').onclick = () => openSheet({ type: 'duration', k });
   $('addMore').onclick = () => go('picker', { pickerQuery: '', pickerMode: 'exercises', anim: 'up' });
@@ -931,7 +1025,7 @@ function renderCalendar() {
     cells.push(`<button class="${cls}" data-k="${k}"><span class="num">${d.getDate()}</span><span class="dot ${logged.has(k) ? 'on' : ''}"></span></button>`);
   }
   app.innerHTML = `
-    <header class="nav">${closeBtn('back', 'Close calendar')}<span class="spacer"></span>
+    <header class="nav">${backBtn('day view')}<span class="spacer"></span>
       <span class="pair glass"><button id="prevM" aria-label="Previous month">${ICON_PREV}</button><button id="nextM" aria-label="Next month">${ICON_NEXT}</button></span></header>
     <div class="large-title">${monthName(m)} <span style="color:var(--label2);font-weight:600">${m.getFullYear()}</span></div>
     <div class="cal-card">
