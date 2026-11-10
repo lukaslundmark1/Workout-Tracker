@@ -374,6 +374,14 @@
   .stat-row.three .stat { padding: 12px 14px; }
   .stat-row.three .stat-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .stat-row.three .stat-n { font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px 10px; padding: 2px 16px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chips.wrap { flex-wrap: wrap; overflow: visible; margin: 0 0 4px; padding: 2px 4px; }
+  .chip { flex: none; padding: 7px 14px; border-radius: 18px; background: var(--fill); font-size: 15px; font-weight: 500; color: var(--label); }
+  .chip.on { background: var(--tint); color: #fff; }
+  .add-dot { width: 28px; height: 28px; border-radius: 50%; background: var(--tint-soft); color: var(--tint); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .del-dot { width: 24px; height: 24px; border-radius: 50%; background: var(--red); color: #fff; display: inline-flex; align-items: center; justify-content: center; flex: none; font-size: 18px; font-weight: 700; line-height: 1; }
+  .cell.armed .main > div:first-child { color: var(--red); }
   .sec-link { display: flex; justify-content: space-between; align-items: baseline; }
   .sec-link button { font-size: 17px; font-weight: 400; letter-spacing: 0; color: var(--tint); }
   .me-cell .avatar { width: 52px; height: 52px; font-size: 22px; }
@@ -556,7 +564,7 @@ function render() {
   const VIEWS = { day: renderDay, log: renderLog, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
                   wList: renderWorkoutList, wEdit: renderWorkoutEdit, pView: renderPlanView, pEdit: renderPlanEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
                   friends: renderFriends, friend: renderFriend, me: renderMe, pWorkouts: renderProfWorkouts, pWorkout: renderProfWorkout,
-                  fEx: renderFriendExercise, settings: renderSettings };
+                  fEx: renderFriendExercise, lib: renderLibrary, settings: renderSettings };
   clearInterval(timerTick);
   app.ontouchstart = app.ontouchend = null;
   VIEWS[state.views[state.tab]]();
@@ -564,7 +572,7 @@ function render() {
   renderDock();
   renderSheet();
 }
-const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pWorkout: 3, fEx: 4 };
+const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pWorkout: 3, fEx: 4, lib: 2 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
 function ghost(onTop) {
@@ -1126,11 +1134,15 @@ function renderPicker() {
     state.pickerQuery = q.value;
     const term = q.value.trim().toLowerCase();
     const matches = data.exercises.filter(e => e.name.toLowerCase().includes(term)).sort(byName);
-    results.innerHTML = `<div class="group"><button class="cell action" data-new="1">${plusLead}New exercise${q.value.trim() ? ` “${esc(q.value.trim())}”` : ''}</button></div>
+    const fromLib = term ? libAll().filter(x => normName(x.name).includes(normName(term)) && !mineFor(x)).slice(0, 5) : [];
+    results.innerHTML = `<div class="group"><button class="cell action" data-browse="1">${plusLead}Browse exercise database</button><button class="cell action" data-new="1">${plusLead}New exercise${q.value.trim() ? ` “${esc(q.value.trim())}”` : ''}</button></div>
       ${matches.length ? `<div class="group">${matches.map(e => inDay.includes(e.id)
         ? `<button class="cell" disabled><span class="main">${esc(e.name)}</span><span class="detail">Added</span></button>`
-        : cell({ attrs: `data-id="${e.id}"`, main: esc(e.name), chev: false })).join('')}</div>` : ''}`;
+        : cell({ attrs: `data-id="${e.id}"`, main: esc(e.name), chev: false })).join('')}</div>` : ''}
+      ${fromLib.length ? `<div class="section">From the database</div><div class="group">${fromLib.map(x => libRowHTML(x, 'day')).join('')}</div>` : ''}`;
     results.querySelectorAll('[data-id]').forEach(b => b.onclick = () => addExerciseToDay(b.dataset.id, null));
+    wireLibRows(results, 'day', draw);
+    results.querySelector('[data-browse]').onclick = () => go('lib', { libBack: 'picker', libEdit: false, libFilter: { q: q.value.trim(), muscle: '', equip: '' } });
     results.querySelector('[data-new]').onclick = () => openSheet({ type: 'exForm', exId: null, name: q.value.trim(), onSave: id => addExerciseToDay(id, null) });
   };
   q.oninput = draw;
@@ -1309,25 +1321,28 @@ function renderExerciseList() {
   app.innerHTML = `
     <header class="nav"></header>
     <div class="large-title">Exercises</div>
+    ${lib.error === 'rules' ? LIB_RULES_HELP : ''}
     ${searchHTML('q', 'Search')}
     <div id="results"></div>
-    <button class="btn-tinted" id="newEx">${ICON_PLUS} Add a new exercise</button>`;
+    <button class="btn-tinted" id="newEx">${ICON_PLUS} Add exercise</button>`;
   const q = $('q');
   q.value = state.exQuery;
   const draw = () => {
     state.exQuery = q.value;
     const term = q.value.trim().toLowerCase();
     const list = data.exercises.filter(e => e.name.toLowerCase().includes(term)).sort(byName);
-    $('results').innerHTML = `<div class="group">${list.length ? list.map(e => {
+    const fromLib = term ? libAll().filter(x => normName(x.name).includes(normName(term)) && !mineFor(x)).slice(0, 5) : [];
+    $('results').innerHTML = (list.length || !fromLib.length ? `<div class="group">${list.length ? list.map(e => {
       const dates = data.sets.filter(s => s.exId === e.id).map(s => s.date).sort();
       return cell({ attrs: `data-id="${e.id}"`, main: esc(e.name), sub: dates.length ? `Last logged ${fmtShort(dates[dates.length - 1])}` : 'Never logged' });
-    }).join('') : `<div class="empty">${data.exercises.length ? 'No matches.' : 'No exercises yet.'}</div>`}</div>`;
+    }).join('') : `<div class="empty">${data.exercises.length ? 'None of your exercises match.' : 'No exercises yet. Tap Add exercise to pick from the database.'}</div>`}</div>` : '')
+      + (fromLib.length ? `<div class="section">From the database</div><div class="group">${fromLib.map(x => libRowHTML(x, 'list')).join('')}</div>` : '');
     $('results').querySelectorAll('[data-id]').forEach(b => b.onclick = () => go('eDetail', { detailExId: b.dataset.id, stat: 'e1rm' }));
+    wireLibRows($('results'), 'list', draw);
   };
   q.oninput = draw;
   draw();
-  const add = () => openSheet({ type: 'exForm', exId: null, name: q.value.trim(), onSave: id => go('eDetail', { detailExId: id, stat: 'e1rm' }) });
-  $('newEx').onclick = add;
+  $('newEx').onclick = () => go('lib', { libBack: 'eList', libEdit: false, libFilter: { q: q.value.trim(), muscle: '', equip: '' } });
 }
 
 function renderExerciseDetail() {
@@ -1688,6 +1703,7 @@ async function initCloud() {
     fb.onAuthStateChanged(cloud.auth, user => {
       stopListening();
       stopFriends();
+      stopLibrary();
       cloud.user = user;
       if (user) startSync(); else setCloudStatus('off');
       if (!state.sheet || state.sheet.type !== 'signin') render();
@@ -1746,6 +1762,7 @@ async function startSync() {
     }
     listen();
     startFriends();
+    startLibrary();
     await pushChanges();                                       // upload anything only this device has
   } catch (e) {
     setCloudStatus(navigator.onLine ? 'error' : 'offline', e.code || e.message);
@@ -1889,7 +1906,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.16.1';
+const APP_VERSION = '0.17';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2231,6 +2248,7 @@ function backOf(v) {
   if (v === 'pWorkouts') return profRoot();
   if (v === 'pWorkout') return state.pwBack || profRoot();
   if (v === 'fEx') return state.fExBack || profRoot();
+  if (v === 'lib') return state.libBack || 'eList';
   return PULL_BACK[v];
 }
 // The training shown on the current profile: your own data, or the friend's cached copy
@@ -2334,6 +2352,132 @@ function renderProfWorkout() {
   $('back').onclick = () => go(backOf('pWorkout'));
   wireProfileBody();
 }
+/* ================= Exercise database =================
+   Built-in starter list (in the app, works offline) + exercises people chose to share (Firestore library/{id}).
+   Picking one copies it into your own exercises; your own variations can stay private. */
+const MUSCLES = [['chest', 'Chest'], ['back', 'Back'], ['shoulders', 'Shoulders'], ['arms', 'Arms'], ['legs', 'Legs'], ['glutes', 'Glutes'], ['core', 'Core'], ['full', 'Full body']];
+const EQUIP = [['barbell', 'Barbell'], ['dumbbell', 'Dumbbell'], ['machine', 'Machine'], ['cable', 'Cable'], ['bodyweight', 'Bodyweight'], ['kettlebell', 'Kettlebell'], ['other', 'Other']];
+const muscleName = k => (MUSCLES.find(m => m[0] === k) || [, ''])[1];
+const equipName = k => (EQUIP.find(m => m[0] === k) || [, ''])[1];
+const normName = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const LIB_RAW = 'Bench press|chest|barbell\nIncline bench press|chest|barbell\nDecline bench press|chest|barbell\nClose-grip bench press|arms|barbell\nDumbbell bench press|chest|dumbbell\nIncline dumbbell press|chest|dumbbell\nDumbbell fly|chest|dumbbell\nIncline dumbbell fly|chest|dumbbell\nMachine chest press|chest|machine\nIncline machine press|chest|machine\nPec deck|chest|machine\nCable fly|chest|cable\nLow-to-high cable fly|chest|cable\nSmith machine bench press|chest|machine\nPush-up|chest|bodyweight\nDip|chest|bodyweight\nDeadlift|back|barbell\nSumo deadlift|back|barbell\nBarbell row|back|barbell\nPendlay row|back|barbell\nT-bar row|back|barbell\nRack pull|back|barbell\nDumbbell row|back|dumbbell\nChest-supported dumbbell row|back|dumbbell\nDumbbell pullover|back|dumbbell\nPull-up|back|bodyweight\nChin-up|back|bodyweight\nInverted row|back|bodyweight\nLat pulldown|back|cable\nClose-grip lat pulldown|back|cable\nStraight-arm pulldown|back|cable\nSeated cable row|back|cable\nSingle-arm cable row|back|cable\nMachine row|back|machine\nAssisted pull-up|back|machine\nBack extension|back|bodyweight\nShrug|back|barbell\nDumbbell shrug|back|dumbbell\nOverhead press|shoulders|barbell\nPush press|shoulders|barbell\nSeated dumbbell shoulder press|shoulders|dumbbell\nArnold press|shoulders|dumbbell\nLateral raise|shoulders|dumbbell\nFront raise|shoulders|dumbbell\nRear delt fly|shoulders|dumbbell\nUpright row|shoulders|barbell\nMachine shoulder press|shoulders|machine\nMachine lateral raise|shoulders|machine\nReverse pec deck|shoulders|machine\nCable lateral raise|shoulders|cable\nFace pull|shoulders|cable\nCable rear delt fly|shoulders|cable\nBarbell curl|arms|barbell\nEZ-bar curl|arms|barbell\nPreacher curl|arms|barbell\nDumbbell curl|arms|dumbbell\nHammer curl|arms|dumbbell\nIncline dumbbell curl|arms|dumbbell\nConcentration curl|arms|dumbbell\nCable curl|arms|cable\nMachine preacher curl|arms|machine\nSkull crusher|arms|barbell\nOverhead dumbbell triceps extension|arms|dumbbell\nDumbbell kickback|arms|dumbbell\nTriceps pushdown|arms|cable\nRope pushdown|arms|cable\nOverhead cable triceps extension|arms|cable\nMachine triceps extension|arms|machine\nBench dip|arms|bodyweight\nWrist curl|arms|dumbbell\nReverse curl|arms|barbell\nBack squat|legs|barbell\nFront squat|legs|barbell\nBox squat|legs|barbell\nRomanian deadlift|legs|barbell\nGood morning|legs|barbell\nBarbell lunge|legs|barbell\nGoblet squat|legs|dumbbell\nBulgarian split squat|legs|dumbbell\nDumbbell lunge|legs|dumbbell\nWalking lunge|legs|dumbbell\nDumbbell Romanian deadlift|legs|dumbbell\nStep-up|legs|dumbbell\nLeg press|legs|machine\nHack squat|legs|machine\nSmith machine squat|legs|machine\nLeg extension|legs|machine\nLying leg curl|legs|machine\nSeated leg curl|legs|machine\nStanding calf raise|legs|machine\nSeated calf raise|legs|machine\nLeg press calf raise|legs|machine\nPendulum squat|legs|machine\nBelt squat|legs|machine\nNordic curl|legs|bodyweight\nBodyweight squat|legs|bodyweight\nHip thrust|glutes|barbell\nGlute bridge|glutes|barbell\nDumbbell hip thrust|glutes|dumbbell\nSingle-leg hip thrust|glutes|bodyweight\nMachine hip thrust|glutes|machine\nHip abduction|glutes|machine\nHip adduction|legs|machine\nGlute kickback machine|glutes|machine\nCable kickback|glutes|cable\nCable pull-through|glutes|cable\nFrog pump|glutes|bodyweight\nKettlebell swing|glutes|kettlebell\nPlank|core|bodyweight\nCrunch|core|bodyweight\nHanging leg raise|core|bodyweight\nHanging knee raise|core|bodyweight\nLying leg raise|core|bodyweight\nAb wheel rollout|core|other\nRussian twist|core|bodyweight\nDead bug|core|bodyweight\nCable crunch|core|cable\nPallof press|core|cable\nCable woodchopper|core|cable\nMachine crunch|core|machine\nDecline sit-up|core|bodyweight\nSide plank|core|bodyweight\nKettlebell goblet squat|legs|kettlebell\nKettlebell deadlift|legs|kettlebell\nTurkish get-up|full|kettlebell\nFarmer\'s carry|full|dumbbell\nPower clean|full|barbell\nClean and jerk|full|barbell\nSnatch|full|barbell\nThruster|full|barbell';
+const LIB_BUILTIN = LIB_RAW.split('\n').map(l => { const [name, muscle, equip] = l.split('|'); return { id: 'b:' + normName(name), name, muscle, equip, builtin: true }; });
+const lib = { shared: (() => { try { return JSON.parse(localStorage.getItem('tt.lib')) || []; } catch (e) { return []; } })(), unsub: null, admin: false, error: '' };
+const libAll = () => [...LIB_BUILTIN, ...lib.shared.filter(x => !LIB_BUILTIN.some(b => normName(b.name) === normName(x.name)))].sort(byName);
+const libById = id => libAll().find(x => x.id === id);
+const libByName = n => libAll().find(x => normName(x.name) === normName(n));
+const mineFor = entry => data.exercises.find(e => e.lib === entry.id || normName(e.name) === normName(entry.name));
+const canDeleteLib = entry => !entry.builtin && cloud.user && (entry.by === cloud.user.uid || lib.admin);
+const libSub = x => [muscleName(x.muscle), equipName(x.equip)].filter(Boolean).join(' · ') + (x.builtin ? '' : ` · added by ${x.by && cloud.user && x.by === cloud.user.uid ? 'you' : esc(x.byName || 'someone')}`);
+
+function startLibrary() {
+  const fb = cloud.fb, me = cloud.user.uid;
+  lib.unsub = fb.onSnapshot(fb.collection(cloud.db, 'library'), snap => {
+    lib.shared = snap.docs.map(d => ({ id: 's:' + d.id, docId: d.id, ...d.data() })).filter(x => x.name);
+    try { localStorage.setItem('tt.lib', JSON.stringify(lib.shared)); } catch (e) {}
+    lib.error = '';
+    const v = state.views[state.tab];
+    if (!state.sheet && (v === 'lib' || v === 'eList' || v === 'picker') && !(document.activeElement && document.activeElement.tagName === 'INPUT')) render();
+  }, e => { lib.error = isPerm(e) ? 'rules' : (e.code || e.message); });
+  fb.getDoc(fb.doc(cloud.db, 'admins', me)).then(d => { lib.admin = d.exists(); }).catch(() => {});
+}
+function stopLibrary() { if (lib.unsub) lib.unsub(); lib.unsub = null; lib.admin = false; }
+
+// Copy a database exercise into your own list (or find the one you already have)
+function addFromLib(entry) {
+  const have = mineFor(entry);
+  if (have) { if (!have.lib) { have.lib = entry.id; have.muscle = have.muscle || entry.muscle; have.equip = have.equip || entry.equip; save(); } return have.id; }
+  const id = uid();
+  data.exercises.push({ id, name: entry.name, track: entry.track || ['weight', 'reps'], instructions: '', video: '', lib: entry.id, muscle: entry.muscle || '', equip: entry.equip || '' });
+  save();
+  return id;
+}
+// Existing exercises with a common name get linked to the database once (adds muscle group + equipment)
+function linkExistingToLib() {
+  let changed = false;
+  for (const e of data.exercises) {
+    if (e.lib) continue;
+    const b = LIB_BUILTIN.find(x => normName(x.name) === normName(e.name));
+    if (b) { e.lib = b.id; e.muscle = e.muscle || b.muscle; e.equip = e.equip || b.equip; changed = true; }
+  }
+  if (changed) save();
+}
+function shareToLib(ex) {
+  const fb = cloud.fb, docId = uid();
+  ex.lib = 's:' + docId;
+  const rec = { name: ex.name, muscle: ex.muscle || '', equip: ex.equip || '', track: ex.track, by: cloud.user.uid, byName: myName(), u: Date.now() };
+  lib.shared.push({ id: ex.lib, docId, ...rec });
+  fb.setDoc(fb.doc(cloud.db, 'library', docId), rec).catch(e => {
+    lib.shared = lib.shared.filter(x => x.docId !== docId);
+    if (ex.lib === 's:' + docId) { delete ex.lib; save(); }
+    lib.error = isPerm(e) ? 'rules' : (e.code || e.message); render();
+  });
+}
+function removeFromLib(entry) {
+  lib.shared = lib.shared.filter(x => x.id !== entry.id);
+  cloud.fb.deleteDoc(cloud.fb.doc(cloud.db, 'library', entry.docId)).catch(e => { lib.error = isPerm(e) ? 'rules' : (e.code || e.message); render(); });
+}
+const LIB_RULES_HELP = `<div class="err">The shared database needs updated Firebase rules. Open Firestore → Rules, paste the new rules from Claude and click Publish.</div>`;
+
+// Rows for database results. mode 'day' = adding to the selected day's workout.
+function libRowHTML(x, mode) {
+  const mine = mineFor(x);
+  const added = mode === 'day' ? (mine && dayOf(state.selected).items.some(i => i.exId === mine.id)) : !!mine;
+  const armed = state.pending === 'libdel:' + x.id;
+  const lead = state.libEdit && canDeleteLib(x) ? `<span class="del-dot" data-libdel="${x.id}" role="button" aria-label="Remove ${esc(x.name)} from the database">−</span>` : '';
+  return `<button class="cell ${armed ? 'armed' : ''}" data-lib="${x.id}">${lead}<span class="main"><div>${armed ? 'Tap − again to remove' : esc(x.name)}</div><div class="sub">${libSub(x)}</div></span>
+    ${state.libEdit ? '' : added ? `<span class="detail">${mode === 'day' ? 'Added' : 'In your list'}</span>` : `<span class="add-dot" aria-hidden="true">${svg('<path d="M12 5v14M5 12h14"/>', 16, 2.6)}</span>`}</button>`;
+}
+function wireLibRows(root, mode, after) {
+  root.querySelectorAll('[data-libdel]').forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    const x = libById(b.dataset.libdel); if (!x) return;
+    if (state.pending !== 'libdel:' + x.id) { state.pending = 'libdel:' + x.id; return after(); }
+    state.pending = null; removeFromLib(x); after();
+  });
+  root.querySelectorAll('[data-lib]').forEach(b => b.onclick = () => {
+    const x = libById(b.dataset.lib); if (!x || state.libEdit) return;
+    const id = addFromLib(x);
+    if (mode === 'day') return addExerciseToDay(id, null);
+    after();
+  });
+}
+
+function renderLibrary() {
+  const mode = state.libBack === 'picker' ? 'day' : 'list';
+  const f = state.libFilter = state.libFilter || { q: '', muscle: '', equip: '' };
+  const deletable = libAll().some(canDeleteLib);
+  if (!deletable) state.libEdit = false;
+  app.innerHTML = `
+    <header class="nav">${backBtn('Back')}<span class="spacer"></span>${deletable ? `<button class="capsule glass" id="libEdit">${state.libEdit ? 'Done' : 'Edit'}</button>` : ''}</header>
+    ${mode === 'day' ? `<div class="eyebrow">Adding to ${fmtLong(state.selected)}</div>` : ''}
+    <div class="large-title">Exercise database</div>
+    ${lib.error === 'rules' ? LIB_RULES_HELP : ''}
+    ${searchHTML('lq', 'Search exercises')}
+    <div class="chips" id="mChips">${MUSCLES.map(([k, n]) => `<button class="chip ${f.muscle === k ? 'on' : ''}" data-m="${k}">${n}</button>`).join('')}</div>
+    <div class="chips" id="eChips">${EQUIP.map(([k, n]) => `<button class="chip ${f.equip === k ? 'on' : ''}" data-e="${k}">${n}</button>`).join('')}</div>
+    <div class="group"><button class="cell action" id="libNew">${plusLead}Create your own exercise</button></div>
+    <div id="libRes"></div>`;
+  const q = $('lq'); q.value = f.q;
+  const draw = () => {
+    f.q = q.value;
+    const term = normName(f.q);
+    const list = libAll().filter(x => (!term || normName(x.name).includes(term)) && (!f.muscle || x.muscle === f.muscle) && (!f.equip || x.equip === f.equip));
+    $('libRes').innerHTML = list.length
+      ? `<div class="group">${list.map(x => libRowHTML(x, mode)).join('')}</div><div class="footnote">${plural(list.length, 'exercise')}${lib.shared.length ? ` · ${lib.shared.length} shared by people using the app` : ''}. Tap one to add it to your exercises.</div>`
+      : `<div class="group"><div class="empty">Nothing matches${f.q.trim() ? ` “${esc(f.q.trim())}”` : ''}. Create your own above.</div></div>`;
+    wireLibRows($('libRes'), mode, draw);
+  };
+  q.oninput = draw;
+  draw();
+  app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { f.muscle = f.muscle === b.dataset.m ? '' : b.dataset.m; render(); });
+  app.querySelectorAll('[data-e]').forEach(b => b.onclick = () => { f.equip = f.equip === b.dataset.e ? '' : b.dataset.e; render(); });
+  $('back').onclick = () => { state.libEdit = false; go(backOf('lib')); };
+  if ($('libEdit')) $('libEdit').onclick = () => { state.libEdit = !state.libEdit; state.pending = null; render(); };
+  $('libNew').onclick = () => openSheet({ type: 'exForm', exId: null, name: f.q.trim(), muscle: f.muscle, equip: f.equip,
+    onSave: id => mode === 'day' ? addExerciseToDay(id, null) : go('eDetail', { detailExId: id, stat: 'e1rm' }) });
+}
+
 // A friend's exercise: same graph and history as your own, read-only
 function renderFriendExercise() {
   if (state.prof === 'me') {
@@ -2425,7 +2569,7 @@ function sheetAcceptFriend(el) {
 // Pull a slid-up screen (or a sheet) down from the top to close it. It follows your finger,
 // the screen underneath grows back into place, and letting go early springs it back.
 const PULL_BACK = { log: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList', friend: 'friends', me: 'friends',
-                    pWorkouts: 1, pWorkout: 1, fEx: 1 };   // 1 = depends on where you came from (backOf)
+                    pWorkouts: 1, pWorkout: 1, fEx: 1, lib: 1 };   // 1 = depends on where you came from (backOf)
 (function pullToClose() {
   let p = null;
   const ease = '.32s cubic-bezier(.2,.85,.3,1)';
@@ -2531,24 +2675,50 @@ function sheetExForm(el) {
     s.name = s.name || (ex ? ex.name : '');
     s.instructions = ex ? ex.instructions : '';
     s.video = ex ? ex.video : '';
+    s.muscle = ex ? ex.muscle || '' : s.muscle || '';
+    s.equip = ex ? ex.equip || '' : s.equip || '';
+    const own = ex && ex.lib && lib.shared.find(x => x.id === ex.lib);
+    s.sharedOwn = !!(own && cloud.user && own.by === cloud.user.uid);
+    s.share = s.sharedOwn;
   }
+  const linked = ex && ex.lib ? libById(ex.lib) : null;                 // copied from the database
+  const fromDb = linked && !s.sharedOwn;
+  const dupe = !fromDb && s.name.trim() && libByName(s.name) && !(ex && ex.lib === libByName(s.name).id) ? libByName(s.name) : null;
   const setCount = ex ? data.sets.filter(x => x.exId === ex.id).length : 0;
   const title = ex ? 'Edit Exercise' : 'New Exercise';
   el.innerHTML = sheetOpen(title,
     `${closeBtn('sCancel')}<b>${title}</b>${okBtn('sSave')}`,
     `<div class="group"><input class="field-input" id="fName" placeholder="Name" autocomplete="off"></div>
+     <div class="section">Muscle group</div>
+     <div class="chips wrap">${MUSCLES.map(([k, n]) => `<button class="chip ${s.muscle === k ? 'on' : ''}" data-fm="${k}">${n}</button>`).join('')}</div>
+     <div class="section">Equipment</div>
+     <div class="chips wrap">${EQUIP.map(([k, n]) => `<button class="chip ${s.equip === k ? 'on' : ''}" data-fe="${k}">${n}</button>`).join('')}</div>
      <div class="section">Tracked by</div>
      <div class="group"><div class="wheels">${wheelHTML('wA', TRACK_A)}<span class="x">×</span>${wheelHTML('wB', TRACK_B)}</div></div>
      <div class="section">Instructions <span class="opt">· optional</span></div>
      <div class="group"><textarea class="field-input" id="fInstr" rows="4" placeholder="Setup, cues, things to remember…"></textarea></div>
      <div class="section">Video <span class="opt">· optional</span></div>
      <div class="group"><input class="field-input" id="fVideo" inputmode="url" autocomplete="off" placeholder="YouTube link"></div>
+     <div class="section">Exercise database</div>
+     ${fromDb ? `<div class="group"><div class="empty">From the exercise database. Your notes, video and changes stay private to you.</div></div>`
+      : cloud.user ? `<div class="group"><label class="set-row"><span class="lbl">${s.sharedOwn ? 'Shared in the database' : 'Add to the database'}</span>
+          <input type="checkbox" class="switch" id="fShare" ${s.share ? 'checked' : ''} ${dupe && !s.sharedOwn ? 'disabled' : ''}></label></div>
+        <div class="footnote" id="fShareNote">${dupe && !s.sharedOwn ? `“${esc(dupe.name)}” is already in the database. Pick it from there instead, or keep this one private.`
+          : 'Everyone using the app can find and add it (only the name, muscle group and equipment are shared). Leave it off for your own variations, like “Bench press, 2 s pause”.'}</div>`
+      : `<div class="group"><div class="empty">Sign in to share exercises with the database. This one stays private.</div></div>`}
      <div class="err" id="fErr"></div>
      ${ex ? `<div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'delEx' ? 'confirm' : ''}" id="sDel">${state.pending === 'delEx'
         ? `Tap again to delete${setCount ? ` (and ${plural(setCount, 'logged set')})` : ''}` : 'Delete Exercise'}</button></div>` : ''}`);
   const fName = $('fName'), fInstr = $('fInstr'), fVideo = $('fVideo');
   fName.value = s.name; fInstr.value = s.instructions; fVideo.value = s.video;
-  fName.oninput = () => s.name = fName.value;
+  fName.oninput = () => {
+    const before = !!(s.name.trim() && libByName(s.name)), now = !!(fName.value.trim() && libByName(fName.value));
+    s.name = fName.value;
+    if (before !== now && !fromDb) { if (now) s.share = s.sharedOwn; renderSheet(); const f = $('fName'); f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+  };
+  el.querySelectorAll('[data-fm]').forEach(b => b.onclick = () => { s.muscle = s.muscle === b.dataset.fm ? '' : b.dataset.fm; renderSheet(); });
+  el.querySelectorAll('[data-fe]').forEach(b => b.onclick = () => { s.equip = s.equip === b.dataset.fe ? '' : b.dataset.fe; renderSheet(); });
+  if ($('fShare')) $('fShare').onchange = e => { s.share = e.target.checked; };
   fInstr.oninput = () => s.instructions = fInstr.value;
   fVideo.oninput = () => s.video = fVideo.value;
   initWheel('wA', ex ? Math.max(0, TRACK_A.findIndex(o => o.v === ex.track[0])) : 0);
@@ -2564,9 +2734,20 @@ function sheetExForm(el) {
     const video = s.video.trim();
     if (video && !ytId(video)) { err.textContent = "That doesn't look like a YouTube link."; return; }
     const track = [TRACK_A[wheelIndex('wA')].v, TRACK_B[wheelIndex('wB')].v];
+    const sharing = cloud.user && !fromDb && s.share && !(dupe && !s.sharedOwn);
+    if (sharing && !s.muscle) { err.textContent = 'Pick a muscle group so others can find it in the database.'; return; }
     let id = s.exId;
-    if (ex) Object.assign(ex, { name, track, instructions: s.instructions.trim(), video });
-    else { id = uid(); data.exercises.push({ id, name, track, instructions: s.instructions.trim(), video }); }
+    const fields = { name, track, instructions: s.instructions.trim(), video, muscle: s.muscle, equip: s.equip };
+    if (ex) Object.assign(ex, fields);
+    else { id = uid(); data.exercises.push({ id, ...fields }); }
+    const rec = exById(id);
+    if (s.sharedOwn && !sharing) { const own = lib.shared.find(x => x.id === rec.lib); if (own) removeFromLib(own); delete rec.lib; }
+    else if (s.sharedOwn && sharing) {
+      const own = lib.shared.find(x => x.id === rec.lib);
+      if (own) { Object.assign(own, { name, muscle: s.muscle, equip: s.equip, track }); cloud.fb.updateDoc(cloud.fb.doc(cloud.db, 'library', own.docId), { name, muscle: s.muscle, equip: s.equip, track, byName: myName(), u: Date.now() }).catch(() => {}); }
+    } else if (sharing) shareToLib(rec);
+    else if (!fromDb && rec.lib && dupe === null && !libById(rec.lib)) delete rec.lib;
+    if (fromDb && normName(name) !== normName(linked.name)) delete rec.lib;   // renamed into your own variation
     save();
     const after = s.onSave;
     state.sheet = null;
@@ -2658,6 +2839,7 @@ function closeStaleSessions() {
   if (changed) save();
 }
 closeStaleSessions();
+linkExistingToLib();
 applyTheme();
 render();
 initCloud();

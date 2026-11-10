@@ -5,6 +5,12 @@ service cloud.firestore {
     function me() { return request.auth.uid; }
     function pair(x, y) { return x < y ? x + '_' + y : y + '_' + x; }
     // True if `owner` has accepted you as a friend and switched on "Share my training"
+    function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(me())); }
+    function validLib(d) {
+      return d.by == me() && d.name is string && d.name.size() > 0 && d.name.size() <= 60
+        && d.muscle is string && d.muscle.size() <= 20 && d.equip is string && d.equip.size() <= 20
+        && d.byName is string && d.byName.size() <= 60;
+    }
     function sharesWith(owner) {
       let path = /databases/$(database)/documents/links/$(pair(owner, me()));
       return exists(path) && get(path).data.status == 'accepted' && get(path).data.share[owner] == true;
@@ -22,6 +28,20 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.uid == me();
       allow update: if signedIn() && resource.data.uid == me() && request.resource.data.uid == me();
       allow delete: if signedIn() && resource.data.uid == me();
+    }
+
+    // Admins (create the doc admins/<your user id> by hand in the console). You can only check yourself.
+    match /admins/{uid} {
+      allow get: if signedIn() && me() == uid;
+    }
+
+    // Shared exercise database: everyone signed in can read; you can add, edit and remove your own;
+    // admins can remove anything
+    match /library/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && validLib(request.resource.data);
+      allow update: if signedIn() && resource.data.by == me() && validLib(request.resource.data);
+      allow delete: if signedIn() && (resource.data.by == me() || isAdmin());
     }
 
     // Friend links between two people (id = the two user ids, sorted, joined by _)
