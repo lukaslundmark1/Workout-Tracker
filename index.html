@@ -339,6 +339,16 @@
   .hero h2 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.02em; }
   .hero p { color: var(--label2); margin: 0; line-height: 1.4; font-size: 15px; }
 
+  /* Sign-in */
+  .google-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 52px; border-radius: 26px; background: var(--sheet-card); font-weight: 600; box-shadow: inset 0 0 0 .5px var(--sep); }
+  .google-btn:active { transform: scale(.97); }
+  .google-btn:disabled, .primary:disabled { opacity: .5; }
+  .or { display: flex; align-items: center; gap: 10px; color: var(--label2); font-size: 13px; margin: 16px 6px; }
+  .or::before, .or::after { content: ""; flex: 1; border-top: .5px solid var(--sep); }
+  .auth-links { display: flex; justify-content: space-between; margin: 10px 2px 0; font-size: 15px; }
+  .tint { color: var(--tint); padding: 8px 4px; font-weight: 500; }
+  .tint:active { opacity: .5; }
+
   /* Floating tab bar */
   #dock {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 10;
@@ -391,10 +401,11 @@ function migrate(d) {
 }
 let data = load();
 let saveError = '';
-function save() {
+function saveLocal() {
   try { localStorage.setItem(KEY, JSON.stringify(data)); saveError = ''; }
   catch (e) { saveError = "Couldn't save on this device."; }
 }
+function save() { saveLocal(); if (typeof scheduleSync === 'function') scheduleSync(); }
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 
@@ -1307,8 +1318,253 @@ function renderWorkoutEdit() {
   };
 }
 
+/* ================= Cloud: accounts + sync (Firebase) ================= */
+// Local-first: the app always reads and writes the copy on this device. When you're signed in,
+// every change is sent to your account, and changes from your other devices are merged in.
+// Each record is its own document; a record is newer when its `u` (updated) time is higher.
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyCvoT-mdnLPmgy33VbsBNngtGHsJ6KoNOc',
+  authDomain: 'workout-tracker-705ae.firebaseapp.com',
+  projectId: 'workout-tracker-705ae',
+  storageBucket: 'workout-tracker-705ae.firebasestorage.app',
+  messagingSenderId: '366945347041',
+  appId: '1:366945347041:web:64698c9f5e6232efad9ea0',
+};
+const cloud = { fb: null, auth: null, db: null, user: null, status: 'off', error: '', unsubs: [], timer: null, sync: null, ready: false };
+
+// How each part of the data maps to a Firestore collection under users/{uid}/
+const COLS = {
+  exercises: { get: () => Object.fromEntries(data.exercises.map(e => [e.id, e])), set: m => { data.exercises = Object.values(m); } },
+  workouts: { get: () => Object.fromEntries(data.workouts.map(w => [w.id, w])), set: m => { data.workouts = Object.values(m); } },
+  days: { get: () => ({ ...data.days }), set: m => { data.days = m; } },
+  sets: { get: () => Object.fromEntries(data.sets.map(s => [s.id, s])), set: m => { data.sets = Object.values(m); } },
+  meta: { get: () => ({ settings: data.settings }), set: m => { if (m.settings) data.settings = migrate({ exercises: [], days: {}, sets: [], settings: m.settings }).settings; } },
+};
+const hash = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
+const syncKey = uid => 'tt.sync.' + uid;
+const loadSync = uid => { try { return JSON.parse(localStorage.getItem(syncKey(uid))) || null; } catch (e) { return null; } };
+const saveSync = () => { try { if (cloud.user) localStorage.setItem(syncKey(cloud.user.uid), JSON.stringify(cloud.sync)); } catch (e) {} };
+const stripRec = d => { const r = { ...d }; delete r.u; delete r.deleted; return r; };
+
+function setCloudStatus(s, err = '') {
+  cloud.status = s; cloud.error = err;
+  const el = document.getElementById('syncStatus');
+  if (el) el.textContent = cloudStatusText();
+}
+function cloudStatusText() {
+  return { off: 'Not signed in', connecting: 'Connecting…', syncing: 'Syncing…', synced: 'Backed up', offline: 'Offline — will sync later', error: 'Sync problem: ' + cloud.error }[cloud.status] || '';
+}
+
+async function initCloud() {
+  try {
+    const fb = cloud.fb = await import('./firebase.js');
+    const app = fb.initializeApp(FIREBASE_CONFIG);
+    cloud.auth = fb.initializeAuth(app, { persistence: [fb.indexedDBLocalPersistence, fb.browserLocalPersistence], popupRedirectResolver: fb.browserPopupRedirectResolver });
+    cloud.db = fb.initializeFirestore(app, { localCache: fb.persistentLocalCache({ tabManager: fb.persistentSingleTabManager() }) });
+    fb.getRedirectResult(cloud.auth).catch(e => { cloud.authError = friendlyAuthError(e); render(); });
+    fb.onAuthStateChanged(cloud.auth, user => {
+      stopListening();
+      cloud.user = user;
+      if (user) startSync(); else setCloudStatus('off');
+      if (!state.sheet || state.sheet.type !== 'signin') render();
+    });
+    cloud.ready = true;
+  } catch (e) {
+    cloud.ready = false;
+    setCloudStatus('error', 'could not load sign-in (are you offline?)');
+  }
+  window.addEventListener('online', () => { if (cloud.user) pushChanges(); });
+}
+
+// The data on this device belongs to one account. If a different account signs in here,
+// put the previous person's data aside (kept on this device) instead of uploading it to the new account.
+function claimLocalData(uid) {
+  let owner = null;
+  try { owner = localStorage.getItem('tt.owner'); } catch (e) {}
+  if (owner && owner !== uid) {
+    try {
+      localStorage.setItem('tt.v1.' + owner, JSON.stringify(data));
+      const mine = JSON.parse(localStorage.getItem('tt.v1.' + uid) || 'null');
+      data = migrate(mine || { exercises: [], days: {}, sets: [], workouts: [], settings: data.settings });
+      state.drafts = {};
+    } catch (e) {}
+  }
+  try { localStorage.setItem('tt.owner', uid); } catch (e) {}
+}
+
+async function startSync() {
+  const fb = cloud.fb, uid = cloud.user.uid;
+  claimLocalData(uid);
+  if (!data.settings.name && cloud.user.displayName) { data.settings.name = cloud.user.displayName; save(); }
+  cloud.sync = loadSync(uid);
+  setCloudStatus('connecting');
+  try {
+    if (!cloud.sync) {
+      // First time this device signs in to this account: download everything once and merge it in
+      cloud.sync = { since: 0, maps: {} };
+      for (const col of Object.keys(COLS)) {
+        cloud.sync.maps[col] = {};
+        const snap = await fb.getDocs(fb.collection(cloud.db, 'users', uid, col));
+        const local = COLS[col].get();
+        snap.forEach(d => {
+          const v = d.data();
+          cloud.sync.since = Math.max(cloud.sync.since, v.u || 0);
+          if (v.deleted) { delete local[d.id]; return; }
+          const rec = stripRec(v);
+          local[d.id] = rec;                                   // the account's copy wins on a clash
+          cloud.sync.maps[col][d.id] = hash(JSON.stringify(rec));
+        });
+        COLS[col].set(local);
+      }
+      saveSync();
+      saveLocal();
+      if (!state.sheet) render();
+    }
+    listen();
+    await pushChanges();                                       // upload anything only this device has
+  } catch (e) {
+    setCloudStatus(navigator.onLine ? 'error' : 'offline', e.code || e.message);
+  }
+}
+
+// Live updates from your other devices
+function listen() {
+  const fb = cloud.fb, uid = cloud.user.uid;
+  const since = Math.max(0, (cloud.sync.since || 0) - 5 * 60 * 1000); // small margin for clock differences
+  for (const col of Object.keys(COLS)) {
+    const q = fb.query(fb.collection(cloud.db, 'users', uid, col), fb.where('u', '>', since));
+    cloud.unsubs.push(fb.onSnapshot(q, snap => {
+      let changed = false;
+      const local = COLS[col].get();
+      const map = cloud.sync.maps[col] = cloud.sync.maps[col] || {};
+      snap.docChanges().forEach(ch => {
+        if (ch.doc.metadata.hasPendingWrites || ch.type === 'removed') return; // our own write echoing back
+        const v = ch.doc.data();
+        cloud.sync.since = Math.max(cloud.sync.since, v.u || 0);
+        if (v.deleted) { if (local[ch.doc.id]) { delete local[ch.doc.id]; changed = true; } delete map[ch.doc.id]; return; }
+        const rec = stripRec(v), h = hash(JSON.stringify(rec));
+        if (map[ch.doc.id] === h && local[ch.doc.id]) return;
+        local[ch.doc.id] = rec; map[ch.doc.id] = h; changed = true;
+      });
+      saveSync();
+      if (changed) {
+        COLS[col].set(local);
+        if (col === 'meta') applyTheme();
+        saveLocal();
+        const typing = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+        if (!typing && !state.sheet) render();
+      }
+      if (!snap.metadata.fromCache && cloud.status !== 'syncing') setCloudStatus('synced');
+    }, e => setCloudStatus('error', e.code || e.message)));
+  }
+}
+function stopListening() { cloud.unsubs.forEach(u => u()); cloud.unsubs = []; }
+
+// Send local changes (compares each record with what was last synced)
+function scheduleSync() { if (!cloud.user || !cloud.sync) return; clearTimeout(cloud.timer); cloud.timer = setTimeout(pushChanges, 600); }
+async function pushChanges() {
+  if (!cloud.user || !cloud.sync) return;
+  const fb = cloud.fb, uid = cloud.user.uid, now = Date.now();
+  const ops = [];
+  for (const col of Object.keys(COLS)) {
+    const local = COLS[col].get();
+    const map = cloud.sync.maps[col] = cloud.sync.maps[col] || {};
+    for (const id in local) {
+      const h = hash(JSON.stringify(local[id]));
+      if (map[id] !== h) ops.push({ col, id, body: { ...JSON.parse(JSON.stringify(local[id])), u: now }, h });
+    }
+    for (const id in map) if (!(id in local)) ops.push({ col, id, body: { deleted: true, u: now }, h: null });
+  }
+  if (!ops.length) { if (cloud.status !== 'error') setCloudStatus(navigator.onLine ? 'synced' : 'offline'); return; }
+  setCloudStatus('syncing');
+  try {
+    for (let i = 0; i < ops.length; i += 400) {
+      const batch = fb.writeBatch(cloud.db);
+      ops.slice(i, i + 400).forEach(o => batch.set(fb.doc(cloud.db, 'users', uid, o.col, o.id), o.body));
+      // Mark as synced right away: Firestore keeps queued writes and sends them when back online
+      ops.slice(i, i + 400).forEach(o => { if (o.h) cloud.sync.maps[o.col][o.id] = o.h; else delete cloud.sync.maps[o.col][o.id]; });
+      saveSync();
+      if (navigator.onLine) await batch.commit(); else batch.commit().catch(() => {});
+    }
+    setCloudStatus(navigator.onLine ? 'synced' : 'offline');
+  } catch (e) {
+    setCloudStatus(navigator.onLine ? 'error' : 'offline', e.code || e.message);
+  }
+}
+
+function friendlyAuthError(e) {
+  const c = (e && e.code) || '';
+  if (c.includes('invalid-credential') || c.includes('wrong-password') || c.includes('user-not-found')) return 'Wrong email or password.';
+  if (c.includes('email-already-in-use')) return 'There is already an account with that email. Sign in instead.';
+  if (c.includes('weak-password')) return 'Use at least 6 characters for the password.';
+  if (c.includes('invalid-email')) return "That email address doesn't look right.";
+  if (c.includes('popup-closed') || c.includes('cancelled-popup')) return '';
+  if (c.includes('network')) return "Couldn't reach the server. Check your connection.";
+  if (c.includes('unauthorized-domain')) return 'This web address is not allowed yet (add it under Authentication → Settings → Authorized domains).';
+  if (c.includes('operation-not-allowed')) return 'This sign-in method is turned off in Firebase.';
+  if (c.includes('too-many-requests')) return 'Too many attempts. Wait a moment and try again.';
+  return 'Sign-in failed (' + (c || e.message || 'unknown error') + ').';
+}
+
+/* Sign-in sheet */
+const ICON_GOOGLE = `<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>`;
+function sheetSignin(el) {
+  const s = state.sheet;
+  s.mode = s.mode || 'signin';
+  const create = s.mode === 'create';
+  el.innerHTML = sheetOpen('Sign in', `${closeBtn('sCancel')}<b>${create ? 'Create account' : 'Sign in'}</b><span></span>`, `
+    <div class="finish-sub" style="margin:0 8px 14px">Back up your workouts and use them on all your devices. Friends come next.</div>
+    <button class="google-btn" id="gBtn">${ICON_GOOGLE}<span>Continue with Google</span></button>
+    <div class="or"><span>or use email</span></div>
+    <div class="group">
+      <input class="field-input" id="aEmail" type="email" inputmode="email" autocomplete="email" placeholder="Email" value="${esc(s.email || '')}">
+      <div style="border-top:.5px solid var(--sep);margin:0 18px"></div>
+      <input class="field-input" id="aPass" type="password" autocomplete="${create ? 'new-password' : 'current-password'}" placeholder="${create ? 'Choose a password (6+ characters)' : 'Password'}">
+    </div>
+    <div class="err" id="aErr">${esc(s.err || cloud.authError || '')}</div>
+    ${s.msg ? `<div class="finish-sub" style="margin:10px 8px 0;color:var(--green)">${esc(s.msg)}</div>` : ''}
+    <button class="primary" id="aGo">${create ? 'Create account' : 'Sign in'}</button>
+    <div class="auth-links">
+      <button class="tint" id="aMode">${create ? 'I already have an account' : 'Create an account'}</button>
+      ${create ? '' : '<button class="tint" id="aForgot">Forgot password?</button>'}
+    </div>`);
+  cloud.authError = '';
+  const email = $('aEmail'), pass = $('aPass');
+  email.oninput = () => { s.email = email.value; };
+  const busy = on => { ['gBtn', 'aGo'].forEach(id => { const b = $(id); if (b) b.disabled = on; }); };
+  const fail = e => { busy(false); s.err = friendlyAuthError(e); s.msg = ''; renderSheet(); };
+  $('sCancel').onclick = () => closeSheet();
+  $('aMode').onclick = () => { s.mode = create ? 'signin' : 'create'; s.err = ''; s.msg = ''; renderSheet(); };
+  if (!cloud.ready) { $('aErr').textContent = 'Sign-in is still loading — check your connection and try again.'; }
+  $('gBtn').onclick = async () => {
+    if (!cloud.ready) return;
+    busy(true);
+    const provider = new cloud.fb.GoogleAuthProvider();
+    try { await cloud.fb.signInWithPopup(cloud.auth, provider); closeSheet(); }
+    catch (e) {
+      if ((e.code || '').includes('popup-blocked') || (e.code || '').includes('operation-not-supported')) {
+        try { await cloud.fb.signInWithRedirect(cloud.auth, provider); } catch (e2) { fail(e2); }
+      } else fail(e);
+    }
+  };
+  $('aGo').onclick = async () => {
+    if (!cloud.ready) return;
+    s.err = ''; busy(true);
+    try {
+      if (create) await cloud.fb.createUserWithEmailAndPassword(cloud.auth, email.value.trim(), pass.value);
+      else await cloud.fb.signInWithEmailAndPassword(cloud.auth, email.value.trim(), pass.value);
+      closeSheet(); render();
+    } catch (e) { fail(e); }
+  };
+  if ($('aForgot')) $('aForgot').onclick = async () => {
+    if (!email.value.trim()) { s.err = 'Type your email above first.'; return renderSheet(); }
+    try { await cloud.fb.sendPasswordResetEmail(cloud.auth, email.value.trim()); s.err = ''; s.msg = 'Password reset email sent. Check your inbox.'; renderSheet(); }
+    catch (e) { fail(e); }
+  };
+}
+
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.10';
+const APP_VERSION = '0.11';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -1327,8 +1583,13 @@ function renderSettings() {
     <div class="large-title">Settings</div>
     <div class="group">
       <div class="profile"><div class="avatar">${esc(initial)}</div><input id="pName" placeholder="Your name" autocomplete="off" value="${esc(st.name)}" aria-label="Your name"></div>
-      <div class="set-row"><span class="lbl">Account</span><span class="badge">Coming with Friends</span></div>
+      ${cloud.user ? `
+        <div class="set-row"><span class="main" style="min-width:0"><div class="lbl">Account</div><div class="sub" style="font-size:14px;color:var(--label2);overflow:hidden;text-overflow:ellipsis">${esc(cloud.user.email || cloud.user.displayName || 'Signed in')}</div></span>
+          <span class="badge" id="syncStatus">${esc(cloudStatusText())}</span></div>
+        <button class="cell destructive ${pend === 'signout' ? 'confirm' : ''}" id="signOut" style="justify-content:flex-start">${pend === 'signout' ? 'Tap again to sign out' : 'Sign out'}</button>`
+      : `<button class="cell action" id="signIn">${plusLead}Sign in to back up and sync</button>`}
     </div>
+    ${cloud.status === 'error' && cloud.user ? `<div class="err">${esc(cloudStatusText())}</div>` : ''}
 
     <div class="section">Preferences</div>
     <div class="group">
@@ -1346,8 +1607,8 @@ function renderSettings() {
       <button class="cell action" id="import">Import backup</button>
       ${pend && pend.startsWith('import') ? `<button class="cell destructive confirm" id="importOk">Replace everything with this backup?</button>` : ''}
     </div>
-    <div class="group"><button class="cell destructive ${pend === 'erase' ? 'confirm' : ''}" id="erase">${pend === 'erase' ? `Tap again to erase ${plural(nSets, 'set')} and ${plural(nEx, 'exercise')}` : 'Erase all workout data'}</button></div>
-    <div class="footnote">Your workouts are stored only on this device for now. Export a backup now and then — it's a small file you can keep in Files or iCloud Drive.</div>
+    <div class="group"><button class="cell destructive ${pend === 'erase' ? 'confirm' : ''}" id="erase">${pend === 'erase' ? `Tap again to erase ${plural(nSets, 'set')} and ${plural(nEx, 'exercise')}${cloud.user ? ' on all your devices' : ''}` : 'Erase all workout data'}</button></div>
+    <div class="footnote">${cloud.user ? 'Your workouts are backed up to your account and synced between your devices.' : "You're not signed in, so your workouts are stored only on this device. Sign in above, or export a backup now and then."}</div>
     <div class="err" id="setErr"></div>
 
     <div class="section">About</div>
@@ -1357,6 +1618,14 @@ function renderSettings() {
     </div>
     <input type="file" id="importFile" accept="application/json,.json" hidden>`;
 
+  if ($('signIn')) $('signIn').onclick = () => openSheet({ type: 'signin' });
+  if ($('signOut')) $('signOut').onclick = async () => {
+    if (state.pending !== 'signout') { state.pending = 'signout'; return render(); }
+    state.pending = null;
+    await pushChanges();
+    stopListening();
+    await cloud.fb.signOut(cloud.auth);
+  };
   const name = $('pName');
   name.oninput = () => { st.name = name.value; save(); app.querySelector('.avatar').textContent = (name.value.trim()[0] || '?').toUpperCase(); };
   app.querySelectorAll('[data-set]').forEach(g => g.querySelectorAll('button').forEach(b => b.onclick = () => {
@@ -1517,7 +1786,7 @@ function renderSheet() {
   const el = $('sheet');
   if (!state.sheet) { el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); return; }
   el.hidden = false; document.body.classList.add('locked');
-  ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration })[state.sheet.type](el);
+  ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration, signin: sheetSignin })[state.sheet.type](el);
 }
 const sheetOpen = (label, head, body) => `<div class="backdrop"></div><div class="sheet" role="dialog" aria-label="${esc(label)}"><div class="sheet-head">${head}</div>${body}</div>`;
 
@@ -1633,6 +1902,7 @@ function sheetSetCount(el) {
 
 applyTheme();
 render();
+initCloud();
 try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); if (!state.sheet) render(); }); } catch (e) {}
 
 /* ================= Offline support ================= */
