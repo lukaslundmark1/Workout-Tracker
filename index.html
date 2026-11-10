@@ -1845,7 +1845,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.13.1';
+const APP_VERSION = '0.13.2';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -1991,25 +1991,34 @@ function startFriends() {
 function stopFriends() { if (friends.unsub) friends.unsub(); friends.unsub = null; friends.links = []; friends.cache = {}; friends.exCache = {}; }
 
 // Each account gets one friend code, reserved in codes/{CODE}
+// Your code is worked out from your account id, so every device shows the same code and it never changes.
+// (If that code is ever taken by someone else, the next variant is used.)
+function codeFor(uid, variant) {
+  const h = (str, seed) => { let x = seed >>> 0; for (let i = 0; i < str.length; i++) { x ^= str.charCodeAt(i); x = Math.imul(x, 16777619) >>> 0; } return x; };
+  const a = h(uid + ':' + variant, 2166136261), b = h(variant + ':' + uid, 374761393);
+  let out = '';
+  for (let i = 0; i < 6; i++) out += CODE_ABC[((i < 3 ? a >>> (i * 5) : b >>> ((i - 3) * 5))) & 31];
+  return out;
+}
 async function ensureCode() {
   const fb = cloud.fb, uid = cloud.user.uid;
   try {
-    if (data.settings.code) {
-      await fb.setDoc(fb.doc(cloud.db, 'codes', data.settings.code), { uid, name: myName() });
-      return;
-    }
-    for (let i = 0; i < 6; i++) {
-      const code = newCode();
+    for (let v = 0; v < 6; v++) {
+      const code = codeFor(uid, v);
       const ref = fb.doc(cloud.db, 'codes', code);
       const ex = await fb.getDoc(ref);
-      if (ex.exists()) continue;
+      if (ex.exists() && ex.data().uid !== uid) continue;   // taken by someone else
       await fb.setDoc(ref, { uid, name: myName() });
-      data.settings.code = code; save();
+      const old = data.settings.code;
+      if (old !== code) {
+        // Release an older random code from before this fix, if it's ours
+        if (old) fb.getDoc(fb.doc(cloud.db, 'codes', old)).then(d => { if (d.exists() && d.data().uid === uid) fb.deleteDoc(d.ref || fb.doc(cloud.db, 'codes', old)); }).catch(() => {});
+        data.settings.code = code; save();
+      }
       if (state.tab === 'friends') render();
       return;
     }
   } catch (e) {
-    if (isPerm(e) && data.settings.code && !friends.retried) { friends.retried = true; data.settings.code = ''; return ensureCode(); }
     friends.error = isPerm(e) ? 'rules' : (e.code || e.message);
     if (state.tab === 'friends') render();
   }
