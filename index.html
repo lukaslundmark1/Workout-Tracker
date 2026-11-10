@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Training tracker</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Training">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: #111; }
+  body {
+    font-family: -apple-system, system-ui, sans-serif; font-size: 17px;
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right);
+    -webkit-tap-highlight-color: transparent;
+  }
+  body.locked { overflow: hidden; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  input, textarea { font: inherit; font-size: 17px; padding: 10px; border: 1px solid #bbb; border-radius: 8px; width: 100%; background: #fff; color: #111; }
+  textarea { resize: vertical; }
+  #app { max-width: 560px; margin: 0 auto; padding: 0 16px calc(84px + env(safe-area-inset-bottom)); }
+
+  /* Top bar */
+  .top { display: flex; align-items: center; gap: 4px; height: 52px; }
+  .top .title { font-weight: 600; font-size: 18px; }
+  .top .crumb { color: #666; }
+  .spacer { flex: 1; }
+  .icon-btn { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 20px; }
+  .icon-btn:active { background: #eee; }
+  .text-btn { padding: 8px 6px; color: #06c; }
+  .small-btn { font-size: 14px; padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; }
+  h1 { font-size: 28px; margin: 6px 0 12px; }
+  h2 { font-size: 20px; margin: 0 0 10px; }
+  h3 { font-size: 15px; margin: 24px 0 8px; color: #666; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+
+  /* Week strip */
+  .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 16px; touch-action: pan-y; }
+  .day { display: flex; flex-direction: column; align-items: center; padding: 6px 0 4px; border-radius: 10px; }
+  .day .wd { font-size: 12px; color: #777; }
+  .day .num { font-size: 18px; font-weight: 500; width: 34px; height: 34px; line-height: 34px; text-align: center; border-radius: 50%; margin-top: 2px; }
+  .day.today .num { color: #d00; font-weight: 700; }
+  .day.sel .num { background: #111; color: #fff; }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; margin-top: 4px; }
+  .dot.on { background: #111; }
+
+  /* Lists */
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { border-bottom: 1px solid #e3e3e3; }
+  .row { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; padding: 14px 2px; gap: 12px; }
+  .sub { font-size: 14px; color: #777; margin-top: 2px; }
+  .chev { color: #aaa; }
+  .empty { color: #888; padding: 12px 0; }
+  .add { margin: 14px 0; padding: 12px; width: 100%; border: 1px dashed #aaa; border-radius: 8px; color: #333; }
+  .workout-tag { font-size: 14px; color: #666; margin: -6px 0 8px; }
+  .search { margin-bottom: 4px; }
+
+  /* Log screen */
+  .log { display: flex; gap: 8px; align-items: flex-end; margin: 6px 0 18px; }
+  .log label { display: flex; flex-direction: column; font-size: 13px; color: #666; gap: 4px; flex: 1; }
+  .primary { background: #111; color: #fff; padding: 11px 16px; border-radius: 8px; white-space: nowrap; }
+  .primary.full { width: 100%; padding: 14px; margin-top: 12px; }
+  .sets li { display: flex; align-items: center; justify-content: space-between; padding: 10px 2px; min-height: 48px; }
+  .sets .n { color: #888; width: 92px; display: inline-block; }
+  .sets li.todo { color: #bbb; }
+  .del { font-size: 14px; color: #888; padding: 6px 10px; border-radius: 6px; }
+  .del.confirm { color: #fff; background: #c00; }
+  .prev { margin-top: 18px; font-size: 14px; color: #666; }
+  .danger { margin-top: 28px; font-size: 15px; color: #c00; padding: 8px 0; }
+  .danger.confirm { font-weight: 600; }
+  details.instr { margin: -4px 0 14px; font-size: 15px; color: #444; }
+  details.instr summary { color: #06c; cursor: pointer; }
+  .instr-text { white-space: pre-wrap; margin-top: 6px; }
+
+  /* Segmented control */
+  .seg { display: flex; background: #eee; border-radius: 9px; padding: 2px; margin-bottom: 12px; }
+  .seg button { flex: 1; padding: 7px 4px; border-radius: 7px; font-size: 15px; color: #444; }
+  .seg button.on { background: #fff; color: #111; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+
+  /* Picker */
+  .pick li button { padding: 13px 2px; width: 100%; text-align: left; }
+  .pick .create { color: #06c; }
+  .pick .already { color: #aaa; }
+
+  /* Calendar */
+  .cal-head, .cal { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; }
+  .cal-head div { font-size: 12px; color: #777; padding: 6px 0; }
+  .cal button { display: flex; flex-direction: column; align-items: center; padding: 4px 0 6px; }
+  .cal .num { width: 36px; height: 36px; line-height: 36px; border-radius: 50%; }
+  .cal .out .num { color: #ccc; }
+  .cal .today .num { color: #d00; font-weight: 700; }
+  .cal .sel .num { background: #111; color: #fff; }
+
+  /* Exercise detail + chart */
+  .headline { font-size: 34px; font-weight: 700; letter-spacing: -.01em; }
+  .headline small { font-size: 17px; font-weight: 500; color: #666; margin-left: 4px; }
+  .chart { position: relative; height: 210px; margin: 8px 0 4px; }
+  .chart svg { display: block; touch-action: pan-y; }
+  .tip { position: absolute; top: 0; transform: translateX(-50%); background: #111; color: #fff; font-size: 13px; padding: 5px 8px; border-radius: 6px; white-space: nowrap; pointer-events: none; }
+  .tip .tv { font-weight: 600; }
+  .note { font-size: 13px; color: #888; }
+  .video { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 10px; overflow: hidden; margin-top: 10px; }
+  .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  a { color: #06c; }
+
+  #status { color: #c00; font-size: 14px; padding-top: 6px; }
+
+  /* Bottom sheet */
+  #sheet[hidden] { display: none; }
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20; animation: fade .2s; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; max-width: 560px; margin: 0 auto;
+    max-height: calc(100% - 40px - env(safe-area-inset-top)); overflow-y: auto; -webkit-overflow-scrolling: touch;
+    background: #fff; border-radius: 16px 16px 0 0; padding: 0 16px calc(20px + env(safe-area-inset-bottom));
+    animation: up .25s ease-out;
+  }
+  @keyframes up { from { transform: translateY(100%); } }
+  @keyframes fade { from { opacity: 0; } }
+  .sheet-head { position: sticky; top: 0; background: #fff; display: flex; align-items: center; justify-content: space-between; height: 54px; z-index: 1; }
+  .sheet-head b { font-size: 17px; }
+  .sheet-head .text-btn.strong { font-weight: 600; }
+  .field { display: block; margin: 14px 0; font-size: 14px; color: #555; }
+  .field > input, .field > textarea { margin-top: 6px; }
+  .opt { color: #aaa; font-weight: 400; }
+  .err { color: #c00; font-size: 14px; min-height: 18px; }
+
+  /* Scroll wheels */
+  .wheels { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .wheels .x { color: #aaa; font-size: 20px; }
+  .wheel { position: relative; height: 200px; flex: 1; }
+  .wheel-scroll {
+    height: 100%; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
+            mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
+  }
+  .wheel-scroll::-webkit-scrollbar { display: none; }
+  .wheel-pad { height: 80px; }
+  .wheel-opt { height: 40px; line-height: 40px; text-align: center; scroll-snap-align: center; font-size: 20px; color: #aaa; }
+  .wheel-opt.on { color: #111; font-weight: 600; }
+  .wheel-band { position: absolute; left: 0; right: 0; top: 80px; height: 40px; background: rgba(0,0,0,.05); border-radius: 8px; pointer-events: none; }
+
+  /* Dock */
+  #dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    height: calc(62px + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom);
+    background: rgba(250,250,250,.96); border-top: 1px solid #e3e3e3;
+    display: flex; justify-content: space-around; align-items: stretch;
+  }
+  #dock button { flex: 1; max-width: 140px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11px; color: #999; }
+  #dock button.on { color: #111; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<nav id="dock" aria-label="Navigation"></nav>
+<div id="sheet" hidden></div>
+
+<script>
+/* ================= Storage ================= */
+const KEY = 'tt.v1';
+function load() {
+  let d = null;
+  try { d = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+  if (!d || !d.exercises) d = { exercises: [], days: {}, sets: [] };
+  return migrate(d);
+}
+function migrate(d) {
+  d.workouts = d.workouts || [];
+  d.exercises.forEach(e => {
+    e.track = e.track || ['weight', 'reps'];
+    e.instructions = e.instructions || '';
+    e.video = e.video || '';
+  });
+  for (const k in d.days) {
+    const day = d.days[k];
+    if (day.exercises && !day.items) { day.items = day.exercises.map(exId => ({ exId, sets: null })); delete day.exercises; }
+    day.items = day.items || [];
+    day.workouts = day.workouts || [];
+  }
+  d.version = 2;
+  return d;
+}
+let data = load();
+let saveError = '';
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(data)); saveError = ''; }
+  catch (e) { saveError = "Couldn't save on this device."; }
+}
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+
+/* ================= Dates ================= */
+const pad = n => String(n).padStart(2, '0');
+const dk = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const parse = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const startOfWeek = d => addDays(d, -((d.getDay() + 6) % 7)); // Monday
+const todayKey = () => dk(new Date());
+const WD = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const fmtLong = k => parse(k).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+const fmtShort = k => parse(k).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtTiny = k => parse(k).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const monthName = d => d.toLocaleDateString('en-GB', { month: 'long' });
+
+/* ================= Helpers ================= */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtW = w => String(Math.round(w * 100) / 100);
+const exById = id => data.exercises.find(e => e.id === id);
+const woById = id => data.workouts.find(w => w.id === id);
+const dayOf = k => data.days[k] || { items: [], workouts: [] };
+const setsFor = (exId, k) => data.sets.filter(s => s.exId === exId && s.date === k).sort((a, b) => a.ts - b.ts);
+const loggedDays = () => new Set(data.sets.map(s => s.date));
+const byName = (a, b) => a.name.localeCompare(b.name);
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+function ytId(url) {
+  const m = String(url).match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([\w-]{11})/);
+  return m ? m[1] : null;
+}
+
+/* Estimated 1RM — Wathan (1994). Among the most accurate equations for sets of
+   roughly 10 reps or fewer (LeSuer et al. 1997 recommended it for squat and bench). */
+const e1rm = s => s.reps <= 1 ? s.weight : (100 * s.weight) / (48.8 + 53.8 * Math.exp(-0.075 * s.reps));
+
+/* Tracking options for the two wheels (more can be added later). */
+const TRACK_A = [{ v: 'weight', label: 'Weight' }];
+const TRACK_B = [{ v: 'reps', label: 'Reps' }];
+
+/* ================= State & routing ================= */
+const state = {
+  tab: 'today',
+  views: { today: 'day', workouts: 'wList', exercises: 'eList' },
+  selected: todayKey(),
+  weekStart: startOfWeek(new Date()),
+  logExId: null,
+  calMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  pending: null,
+  pickerMode: null,
+  pickerQuery: '',
+  exQuery: '',
+  detailExId: null,
+  stat: 'e1rm',
+  draft: null,        // workout being edited
+  sheet: null,        // open bottom sheet
+};
+const app = document.getElementById('app');
+const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList' };
+
+function render() {
+  const VIEWS = { day: renderDay, log: renderLog, picker: renderPicker, calendar: renderCalendar,
+                  wList: renderWorkoutList, wEdit: renderWorkoutEdit, eList: renderExerciseList, eDetail: renderExerciseDetail };
+  VIEWS[state.views[state.tab]]();
+  if (saveError) app.insertAdjacentHTML('afterbegin', `<div id="status">${saveError}</div>`);
+  renderDock();
+  renderSheet();
+}
+function go(view, extra = {}) {
+  Object.assign(state, extra);
+  state.views[state.tab] = view;
+  state.pending = null;
+  render();
+  window.scrollTo(0, 0);
+}
+function flash(msg, where = app) {
+  let el = where.querySelector('.err, #status');
+  if (!el) { app.insertAdjacentHTML('afterbegin', '<div id="status"></div>'); el = document.getElementById('status'); }
+  el.textContent = msg;
+}
+const $ = id => document.getElementById(id);
+
+/* ================= Icons ================= */
+const svg = (p, s = 22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const ICON_CAL = svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>');
+const ICON_TODAY = svg('<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>', 24);
+const ICON_WORKOUTS = svg('<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/>', 24);
+const ICON_EXERCISES = svg('<path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>', 24);
+
+/* ================= Dock ================= */
+function renderDock() {
+  const tabs = [['today', 'Today', ICON_TODAY], ['workouts', 'Workouts', ICON_WORKOUTS], ['exercises', 'Exercises', ICON_EXERCISES]];
+  const dock = $('dock');
+  dock.innerHTML = tabs.map(([t, label, icon]) => `<button data-tab="${t}" class="${state.tab === t ? 'on' : ''}">${icon}<span>${label}</span></button>`).join('');
+  dock.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
+    const t = b.dataset.tab;
+    if (state.tab === t) { go(TAB_ROOT[t]); return; }
+    state.tab = t; state.pending = null; render(); window.scrollTo(0, 0);
+  });
+}
+
+/* ================= Scroll wheel ================= */
+const ITEM = 40;
+function wheelHTML(id, options) {
+  return `<div class="wheel" id="${id}"><div class="wheel-scroll"><div class="wheel-pad"></div>${options.map((o, i) =>
+    `<div class="wheel-opt" data-i="${i}">${esc(o.label)}</div>`).join('')}<div class="wheel-pad"></div></div><div class="wheel-band"></div></div>`;
+}
+function initWheel(id, index) {
+  const sc = $(id).querySelector('.wheel-scroll');
+  const opts = [...sc.querySelectorAll('.wheel-opt')];
+  const mark = () => { const i = wheelIndex(id); opts.forEach((o, j) => o.classList.toggle('on', i === j)); };
+  sc.scrollTop = index * ITEM;
+  mark();
+  sc.addEventListener('scroll', mark, { passive: true });
+  opts.forEach(o => o.onclick = () => sc.scrollTo({ top: Number(o.dataset.i) * ITEM, behavior: 'smooth' }));
+}
+function wheelIndex(id) {
+  const sc = $(id).querySelector('.wheel-scroll');
+  const n = sc.querySelectorAll('.wheel-opt').length;
+  return Math.max(0, Math.min(n - 1, Math.round(sc.scrollTop / ITEM)));
+}
+
+/* ================= TODAY: day view ================= */
+function weekLabel(ws) {
+  const we = addDays(ws, 6);
+  if (ws.getMonth() === we.getMonth()) return `${monthName(ws)} ${ws.getFullYear()}`;
+  const y = ws.getFullYear() === we.getFullYear() ? '' : ` ${ws.getFullYear()}`;
+  return `${monthName(ws).slice(0, 3)}${y} – ${monthName(we).slice(0, 3)} ${we.getFullYear()}`;
+}
+
+function renderDay() {
+  const logged = loggedDays();
+  const tk = todayKey();
+  const showToday = dk(state.weekStart) !== dk(startOfWeek(new Date())) || state.selected !== tk;
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const k = dk(addDays(state.weekStart, i));
+    const cls = ['day', k === tk && 'today', k === state.selected && 'sel'].filter(Boolean).join(' ');
+    return `<button class="${cls}" data-k="${k}"><span class="wd">${WD[i]}</span><span class="num">${parse(k).getDate()}</span><span class="dot ${logged.has(k) ? 'on' : ''}"></span></button>`;
+  }).join('');
+
+  const day = dayOf(state.selected);
+  const rows = day.items.map(it => {
+    const ex = exById(it.exId); if (!ex) return '';
+    const s = setsFor(it.exId, state.selected);
+    const count = it.sets ? `${s.length}/${it.sets} sets` : plural(s.length, 'set');
+    const sub = s.length ? `${count} · ${s.map(x => `${fmtW(x.weight)}×${x.reps}`).join(', ')}`
+                         : (it.sets ? `${plural(it.sets, 'set')} planned` : 'Not logged yet');
+    return `<li><button class="row" data-ex="${it.exId}"><span><div>${esc(ex.name)}</div><div class="sub">${sub}</div></span><span class="chev">›</span></button></li>`;
+  }).join('');
+
+  app.innerHTML = `
+    <header class="top">
+      <span class="title">${weekLabel(state.weekStart)}</span>
+      <button class="icon-btn" id="prevW" aria-label="Previous week">‹</button>
+      <button class="icon-btn" id="nextW" aria-label="Next week">›</button>
+      <span class="spacer"></span>
+      ${showToday ? '<button class="small-btn" id="today">Today</button>' : ''}
+      <button class="icon-btn" id="calBtn" aria-label="Calendar">${ICON_CAL}</button>
+    </header>
+    <div class="week" id="week">${days}</div>
+    <h2>${fmtLong(state.selected)}</h2>
+    ${day.workouts.length ? `<div class="workout-tag">${day.workouts.map(w => esc(w.name)).join(' + ')}</div>` : ''}
+    ${day.items.length ? `<ul class="list">${rows}</ul>` : '<div class="empty">No workout for this day.</div>'}
+    <button class="add" id="addEx">+ Add exercise / workout</button>`;
+
+  const shift = n => { state.weekStart = addDays(state.weekStart, 7 * n); render(); };
+  $('prevW').onclick = () => shift(-1);
+  $('nextW').onclick = () => shift(1);
+  if ($('today')) $('today').onclick = () => { state.selected = tk; state.weekStart = startOfWeek(new Date()); render(); };
+  $('calBtn').onclick = () => { const d = parse(state.selected); go('calendar', { calMonth: new Date(d.getFullYear(), d.getMonth(), 1) }); };
+  $('addEx').onclick = () => go('picker', { pickerQuery: '', pickerMode: data.workouts.length ? 'workouts' : 'exercises' });
+  app.querySelectorAll('.day').forEach(b => b.onclick = () => { state.selected = b.dataset.k; render(); });
+  app.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => go('log', { logExId: b.dataset.ex }));
+
+  const wk = $('week');
+  let x0 = null;
+  wk.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  wk.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0; x0 = null;
+    if (Math.abs(dx) > 50) shift(dx < 0 ? 1 : -1);
+  });
+}
+
+/* ================= TODAY: log sets ================= */
+function renderLog() {
+  const ex = exById(state.logExId);
+  if (!ex) return go('day');
+  const k = state.selected;
+  const item = dayOf(k).items.find(i => i.exId === ex.id);
+  const target = item && item.sets;
+  const today = setsFor(ex.id, k);
+  const lastAny = data.sets.filter(s => s.exId === ex.id).sort((a, b) => b.ts - a.ts)[0];
+  const pre = today[today.length - 1] || lastAny;
+  const prevDates = [...new Set(data.sets.filter(s => s.exId === ex.id && s.date < k).map(s => s.date))].sort();
+  const prevK = prevDates[prevDates.length - 1];
+  const prevLine = prevK ? `Last time (${fmtShort(prevK)}): ${setsFor(ex.id, prevK).map(s => `${fmtW(s.weight)}×${s.reps}`).join(', ')}` : '';
+
+  let rows = today.map((s, i) => `
+    <li><span><span class="n">Set ${i + 1}${target ? ` of ${target}` : ''}</span>${fmtW(s.weight)} kg × ${s.reps}</span>
+    <button class="del ${state.pending === s.id ? 'confirm' : ''}" data-del="${s.id}">${state.pending === s.id ? 'Delete' : '✕'}</button></li>`).join('');
+  for (let i = today.length; i < (target || 0); i++) rows += `<li class="todo"><span><span class="n">Set ${i + 1} of ${target}</span>—</span></li>`;
+
+  const vid = ytId(ex.video);
+  const hasInstr = ex.instructions || vid;
+  const removeLabel = state.pending === 'remove'
+    ? (today.length ? `Tap again to remove (deletes ${plural(today.length, 'set')})` : 'Tap again to remove')
+    : 'Remove from this day';
+
+  app.innerHTML = `
+    <header class="top"><button class="icon-btn" id="back" aria-label="Back">‹</button><span class="crumb">${fmtShort(k)}</span></header>
+    <h2>${esc(ex.name)}</h2>
+    ${hasInstr ? `<details class="instr"><summary>Instructions</summary>
+      ${ex.instructions ? `<div class="instr-text">${esc(ex.instructions)}</div>` : ''}
+      ${vid ? `<p><a href="https://www.youtube.com/watch?v=${vid}" target="_blank" rel="noopener">Watch video on YouTube ↗</a></p>` : ''}
+    </details>` : ''}
+    <form class="log" id="logForm">
+      <label>Weight (kg)<input id="w" inputmode="decimal" autocomplete="off" value="${pre ? fmtW(pre.weight) : ''}"></label>
+      <label>Reps<input id="r" inputmode="numeric" autocomplete="off" value="${pre ? pre.reps : ''}"></label>
+      <button class="primary">Log set</button>
+    </form>
+    ${rows ? `<ul class="list sets">${rows}</ul>` : '<div class="empty">No sets logged yet.</div>'}
+    ${prevLine ? `<div class="prev">${prevLine}</div>` : ''}
+    <button class="danger ${state.pending === 'remove' ? 'confirm' : ''}" id="remove">${removeLabel}</button>`;
+
+  $('back').onclick = () => go('day');
+  $('logForm').onsubmit = e => {
+    e.preventDefault();
+    const weight = parseFloat($('w').value.replace(',', '.'));
+    const reps = parseInt($('r').value, 10);
+    if (!(weight >= 0) || !(reps > 0)) { flash('Enter a weight and a rep count.'); return; }
+    data.sets.push({ id: uid(), exId: ex.id, date: k, weight, reps, ts: Date.now() });
+    save(); state.pending = null; render();
+  };
+  app.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    const id = b.dataset.del;
+    if (state.pending !== id) { state.pending = id; return render(); }
+    data.sets = data.sets.filter(s => s.id !== id); save(); state.pending = null; render();
+  });
+  $('remove').onclick = () => {
+    if (state.pending !== 'remove') { state.pending = 'remove'; return render(); }
+    const day = data.days[k];
+    day.items = day.items.filter(i => i.exId !== ex.id);
+    if (!day.items.length) delete data.days[k];
+    data.sets = data.sets.filter(s => !(s.exId === ex.id && s.date === k));
+    save(); go('day');
+  };
+}
+
+/* ================= TODAY: add exercise / workout ================= */
+function renderPicker() {
+  const mode = state.pickerMode;
+  app.innerHTML = `
+    <header class="top"><button class="icon-btn" id="back" aria-label="Back">‹</button><span class="title">Add to ${fmtShort(state.selected)}</span></header>
+    <div class="seg"><button data-m="workouts" class="${mode === 'workouts' ? 'on' : ''}">Workouts</button><button data-m="exercises" class="${mode === 'exercises' ? 'on' : ''}">Exercises</button></div>
+    ${mode === 'exercises' ? '<input id="q" class="search" placeholder="Search exercises" autocomplete="off">' : ''}
+    <ul class="list pick" id="results"></ul>`;
+  $('back').onclick = () => go('day');
+  app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { state.pickerMode = b.dataset.m; render(); });
+  const results = $('results');
+  const inDay = dayOf(state.selected).items.map(i => i.exId);
+
+  if (mode === 'workouts') {
+    const list = data.workouts.slice().sort(byName);
+    results.innerHTML = list.length
+      ? list.map(w => `<li><button data-w="${w.id}"><div>${esc(w.name)}</div><div class="sub">${plural(w.items.length, 'exercise')} · ${plural(w.items.reduce((a, i) => a + i.sets, 0), 'set')}</div></button></li>`).join('')
+      : '<li class="empty">No workouts yet. Make one in the Workouts tab.</li>';
+    results.querySelectorAll('[data-w]').forEach(b => b.onclick = () => addWorkoutToDay(b.dataset.w));
+    return;
+  }
+
+  const q = $('q');
+  q.value = state.pickerQuery;
+  const draw = () => {
+    state.pickerQuery = q.value;
+    const term = q.value.trim().toLowerCase();
+    const matches = data.exercises.filter(e => e.name.toLowerCase().includes(term)).sort(byName);
+    let html = `<li><button class="create" data-new="1">+ New exercise${q.value.trim() ? ` “${esc(q.value.trim())}”` : ''}</button></li>`;
+    html += matches.map(e => inDay.includes(e.id)
+      ? `<li><button class="already" disabled>${esc(e.name)} · already added</button></li>`
+      : `<li><button data-id="${e.id}">${esc(e.name)}</button></li>`).join('');
+    results.innerHTML = html;
+    results.querySelectorAll('[data-id]').forEach(b => b.onclick = () => addExerciseToDay(b.dataset.id, null));
+    results.querySelector('[data-new]').onclick = () => openSheet({ type: 'exForm', exId: null, name: q.value.trim(), onSave: id => addExerciseToDay(id, null) });
+  };
+  q.oninput = draw;
+  draw();
+}
+function ensureDay(k) { return (data.days[k] = data.days[k] || { items: [], workouts: [] }); }
+function addExerciseToDay(exId, sets) {
+  const day = ensureDay(state.selected);
+  if (!day.items.some(i => i.exId === exId)) day.items.push({ exId, sets });
+  save(); go('day');
+}
+function addWorkoutToDay(wId) {
+  const w = woById(wId); if (!w) return;
+  const day = ensureDay(state.selected);
+  w.items.forEach(it => { if (!day.items.some(i => i.exId === it.exId)) day.items.push({ exId: it.exId, sets: it.sets }); });
+  day.workouts.push({ id: w.id, name: w.name });
+  save(); go('day');
+}
+
+/* ================= TODAY: calendar ================= */
+function renderCalendar() {
+  const m = state.calMonth;
+  const logged = loggedDays();
+  const tk = todayKey();
+  const start = startOfWeek(m);
+  const cells = [];
+  for (let i = 0; i < 42; i++) {
+    const d = addDays(start, i);
+    if (i >= 35 && d.getMonth() !== m.getMonth()) break;
+    const k = dk(d);
+    const cls = [d.getMonth() !== m.getMonth() && 'out', k === tk && 'today', k === state.selected && 'sel'].filter(Boolean).join(' ');
+    cells.push(`<button class="${cls}" data-k="${k}"><span class="num">${d.getDate()}</span><span class="dot ${logged.has(k) ? 'on' : ''}"></span></button>`);
+  }
+  app.innerHTML = `
+    <header class="top">
+      <button class="icon-btn" id="back" aria-label="Close calendar">✕</button>
+      <span class="title">${monthName(m)} ${m.getFullYear()}</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" id="prevM" aria-label="Previous month">‹</button>
+      <button class="icon-btn" id="nextM" aria-label="Next month">›</button>
+    </header>
+    <div class="cal-head">${WD.map(w => `<div>${w}</div>`).join('')}</div>
+    <div class="cal">${cells.join('')}</div>`;
+  $('back').onclick = () => go('day');
+  $('prevM').onclick = () => { state.calMonth = new Date(m.getFullYear(), m.getMonth() - 1, 1); render(); };
+  $('nextM').onclick = () => { state.calMonth = new Date(m.getFullYear(), m.getMonth() + 1, 1); render(); };
+  app.querySelectorAll('.cal [data-k]').forEach(b => b.onclick = () => go('day', { selected: b.dataset.k, weekStart: startOfWeek(parse(b.dataset.k)) }));
+}
+
+/* ================= EXERCISES tab ================= */
+function renderExerciseList() {
+  app.innerHTML = `
+    <h1>Exercises</h1>
+    <input id="q" class="search" placeholder="Search exercises" autocomplete="off">
+    <button class="add" id="newEx">+ Add a new exercise</button>
+    <ul class="list" id="results"></ul>`;
+  const q = $('q');
+  q.value = state.exQuery;
+  const draw = () => {
+    state.exQuery = q.value;
+    const term = q.value.trim().toLowerCase();
+    const list = data.exercises.filter(e => e.name.toLowerCase().includes(term)).sort(byName);
+    $('results').innerHTML = list.length ? list.map(e => {
+      const dates = data.sets.filter(s => s.exId === e.id).map(s => s.date).sort();
+      const sub = dates.length ? `Last logged ${fmtShort(dates[dates.length - 1])}` : 'Never logged';
+      return `<li><button class="row" data-id="${e.id}"><span><div>${esc(e.name)}</div><div class="sub">${sub}</div></span><span class="chev">›</span></button></li>`;
+    }).join('') : `<li class="empty">${data.exercises.length ? 'No matches.' : 'No exercises yet.'}</li>`;
+    $('results').querySelectorAll('[data-id]').forEach(b => b.onclick = () => go('eDetail', { detailExId: b.dataset.id, stat: 'e1rm' }));
+  };
+  q.oninput = draw;
+  draw();
+  $('newEx').onclick = () => openSheet({ type: 'exForm', exId: null, name: q.value.trim(), onSave: id => go('eDetail', { detailExId: id, stat: 'e1rm' }) });
+}
+
+const STATS = [
+  { key: 'e1rm', label: 'Est. 1RM', unit: 'kg' },
+  { key: 'heaviest', label: 'Heaviest', unit: 'kg' },
+  { key: 'volume', label: 'Volume', unit: 'kg' },
+  { key: 'reps', label: 'Reps', unit: 'reps' },
+];
+function seriesFor(exId, key) {
+  const byDate = {};
+  data.sets.filter(s => s.exId === exId).forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
+  return Object.keys(byDate).sort().map(k => {
+    const ss = byDate[k];
+    let v, note;
+    if (key === 'e1rm') {
+      const best = ss.reduce((a, s) => (e1rm(s) > e1rm(a) ? s : a));
+      v = e1rm(best); note = `from ${fmtW(best.weight)} × ${best.reps}`;
+    } else if (key === 'heaviest') {
+      v = Math.max(...ss.map(s => s.weight)); note = plural(ss.length, 'set');
+    } else if (key === 'volume') {
+      v = ss.reduce((a, s) => a + s.weight * s.reps, 0); note = plural(ss.length, 'set');
+    } else {
+      v = ss.reduce((a, s) => a + s.reps, 0); note = plural(ss.length, 'set');
+    }
+    return { k, t: parse(k).getTime(), v, note };
+  });
+}
+const fmtStat = (v, key) => key === 'volume' || key === 'reps' ? Math.round(v).toLocaleString('en-GB') : (Math.round(v * 10) / 10).toFixed(1);
+
+function renderExerciseDetail() {
+  const ex = exById(state.detailExId);
+  if (!ex) return go('eList');
+  const stat = STATS.find(s => s.key === state.stat);
+  const pts = seriesFor(ex.id, stat.key);
+  const last = pts[pts.length - 1];
+  const best = pts.length ? Math.max(...pts.map(p => p.v)) : 0;
+  const diff = pts.length > 1 ? last.v - pts[0].v : 0;
+  const vid = ytId(ex.video);
+
+  app.innerHTML = `
+    <header class="top"><button class="icon-btn" id="back" aria-label="Back">‹</button><span class="crumb">Exercises</span><span class="spacer"></span><button class="text-btn" id="edit">Edit</button></header>
+    <h1>${esc(ex.name)}</h1>
+    <div class="seg">${STATS.map(s => `<button data-s="${s.key}" class="${s.key === stat.key ? 'on' : ''}">${s.label}</button>`).join('')}</div>
+    ${pts.length ? `
+      <div class="headline">${fmtStat(last.v, stat.key)}<small>${stat.unit}</small></div>
+      <div class="sub">Latest · ${fmtShort(last.k)}${pts.length > 1 ? ` · Best ${fmtStat(best, stat.key)} ${stat.unit} · ${diff >= 0 ? '+' : '−'}${fmtStat(Math.abs(diff), stat.key)} since ${fmtTiny(pts[0].k)}` : ''}</div>` : ''}
+    <div class="chart" id="chart"></div>
+    ${stat.key === 'e1rm' && pts.length ? '<div class="note">Best set of each session, estimated with the Wathan formula. Most accurate for sets of about 10 reps or fewer.</div>' : ''}
+    <h3>Instructions</h3>
+    ${ex.instructions ? `<div class="instr-text">${esc(ex.instructions)}</div>` : ''}
+    ${vid ? `<div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${vid}" title="Exercise video" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>
+             <p><a href="https://www.youtube.com/watch?v=${vid}" target="_blank" rel="noopener">Open in YouTube ↗</a></p>` : ''}
+    ${!ex.instructions && !vid ? '<div class="empty">No instructions yet. Tap Edit to add some.</div>' : ''}`;
+
+  $('back').onclick = () => go('eList');
+  $('edit').onclick = () => openSheet({ type: 'exForm', exId: ex.id });
+  app.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { state.stat = b.dataset.s; render(); });
+  drawChart($('chart'), pts, stat);
+}
+
+function niceTicks(lo, hi, n) {
+  const raw = (hi - lo) / n;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+  const out = [];
+  for (let v = Math.floor(lo / step) * step; ; v += step) { out.push(+v.toFixed(6)); if (v >= hi - 1e-9) break; }
+  return out;
+}
+function drawChart(box, pts, stat) {
+  if (!pts.length) { box.style.height = 'auto'; box.innerHTML = '<div class="empty">Log some sets to see your progress here.</div>'; return; }
+  const W = box.clientWidth, H = 210, L = 40, R = 12, T = 34, B = 24;
+  const vals = pts.map(p => p.v);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (lo === hi) { const pad = Math.max(1, Math.abs(lo) * 0.05); lo -= pad; hi += pad; }
+  const ticks = niceTicks(lo, hi, 4), y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  const x = t => t1 === t0 ? L + (W - L - R) / 2 : L + ((t - t0) / (t1 - t0)) * (W - L - R);
+  const y = v => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  const tickFmt = v => stat.key === 'volume' && y1 >= 10000 ? `${Math.round(v / 1000)}k` : fmtW(v);
+  const grid = ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#eee"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="#999">${tickFmt(v)}</text>`).join('');
+  const xl = pts.length > 1
+    ? `<text x="${L}" y="${H - 6}" font-size="11" fill="#999">${fmtTiny(pts[0].k)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end" font-size="11" fill="#999">${fmtTiny(pts[pts.length - 1].k)}</text>`
+    : `<text x="${x(t0)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="#999">${fmtTiny(pts[0].k)}</text>`;
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
+  const dots = pts.map(p => `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="4" fill="#111" stroke="#fff" stroke-width="2"/>`).join('');
+  box.innerHTML = `<svg width="${W}" height="${H}" role="img" aria-label="${stat.label} over time">
+      ${grid}${xl}
+      <path d="${d}" fill="none" stroke="#111" stroke-width="2" stroke-linejoin="round"/>
+      ${dots}
+      <line id="cross" y1="${T - 4}" y2="${H - B}" stroke="#bbb" stroke-dasharray="3 3" visibility="hidden"/>
+      <circle id="focus" r="6" fill="#111" stroke="#fff" stroke-width="2" visibility="hidden"/>
+      <rect id="hit" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>
+    </svg><div class="tip" id="tip" hidden></div>`;
+  const hit = box.querySelector('#hit'), cross = box.querySelector('#cross'), focus = box.querySelector('#focus'), tip = box.querySelector('#tip');
+  const show = e => {
+    const r = hit.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    let p = pts[0];
+    for (const q of pts) if (Math.abs(x(q.t) - mx) < Math.abs(x(p.t) - mx)) p = q;
+    const px = x(p.t), py = y(p.v);
+    cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.setAttribute('visibility', 'visible');
+    focus.setAttribute('cx', px); focus.setAttribute('cy', py); focus.setAttribute('visibility', 'visible');
+    tip.hidden = false;
+    tip.innerHTML = `<span class="tv">${fmtStat(p.v, stat.key)} ${stat.unit}</span> · ${fmtTiny(p.k)}<br><span style="opacity:.75">${p.note}</span>`;
+    const half = tip.offsetWidth / 2;
+    tip.style.left = Math.max(half, Math.min(W - half, px)) + 'px';
+  };
+  hit.addEventListener('pointerdown', show);
+  hit.addEventListener('pointermove', show);
+}
+window.addEventListener('resize', () => { if (state.tab === 'exercises' && state.views.exercises === 'eDetail' && !state.sheet) render(); });
+
+/* ================= WORKOUTS tab ================= */
+function renderWorkoutList() {
+  const list = data.workouts.slice().sort(byName);
+  app.innerHTML = `
+    <h1>Workouts</h1>
+    <button class="add" id="newW">+ Create a new workout</button>
+    <ul class="list">${list.length ? list.map(w => `<li><button class="row" data-id="${w.id}"><span><div>${esc(w.name)}</div>
+      <div class="sub">${plural(w.items.length, 'exercise')} · ${plural(w.items.reduce((a, i) => a + i.sets, 0), 'set')}</div></span><span class="chev">›</span></button></li>`).join('')
+      : '<li class="empty">No workouts yet.</li>'}</ul>`;
+  $('newW').onclick = () => go('wEdit', { draft: { id: null, name: '', items: [] } });
+  app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => {
+    const w = woById(b.dataset.id);
+    go('wEdit', { draft: { id: w.id, name: w.name, items: w.items.map(i => ({ ...i })) } });
+  });
+}
+
+function renderWorkoutEdit() {
+  const dr = state.draft;
+  if (!dr) return go('wList');
+  const rows = dr.items.map((it, i) => {
+    const ex = exById(it.exId);
+    return `<li class="row" style="padding:10px 2px"><button data-sets="${i}" style="flex:1;text-align:left"><div>${esc(ex ? ex.name : 'Deleted exercise')}</div><div class="sub">${plural(it.sets, 'set')} · tap to change</div></button>
+      <button class="del" data-rm="${i}" aria-label="Remove">✕</button></li>`;
+  }).join('');
+  app.innerHTML = `
+    <header class="top"><button class="text-btn" id="cancel">Cancel</button><span class="spacer"></span><b>${dr.id ? 'Edit workout' : 'New workout'}</b><span class="spacer"></span><button class="text-btn" id="saveW" style="font-weight:600">Save</button></header>
+    <label class="field">Name<input id="wName" placeholder="e.g. Push day" autocomplete="off"></label>
+    <h3>Exercises</h3>
+    ${dr.items.length ? `<ul class="list">${rows}</ul>` : '<div class="empty">No exercises yet.</div>'}
+    <button class="add" id="addToW">+ Add exercise</button>
+    <div class="err" id="wErr"></div>
+    ${dr.id ? `<button class="danger ${state.pending === 'delW' ? 'confirm' : ''}" id="delW">${state.pending === 'delW' ? 'Tap again to delete this workout' : 'Delete workout'}</button>` : ''}`;
+  const name = $('wName');
+  name.value = dr.name;
+  name.oninput = () => { dr.name = name.value; };
+  $('cancel').onclick = () => go('wList', { draft: null });
+  $('addToW').onclick = () => openSheet({ type: 'addToWorkout', step: 'pick', q: '' });
+  app.querySelectorAll('[data-sets]').forEach(b => b.onclick = () => openSheet({ type: 'setCount', index: Number(b.dataset.sets) }));
+  app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { dr.items.splice(Number(b.dataset.rm), 1); render(); });
+  $('saveW').onclick = () => {
+    const nm = dr.name.trim();
+    if (!nm) { $('wErr').textContent = 'Give the workout a name.'; name.focus(); return; }
+    if (dr.id) Object.assign(woById(dr.id), { name: nm, items: dr.items });
+    else data.workouts.push({ id: uid(), name: nm, items: dr.items });
+    save(); go('wList', { draft: null });
+  };
+  if ($('delW')) $('delW').onclick = () => {
+    if (state.pending !== 'delW') { state.pending = 'delW'; return render(); }
+    data.workouts = data.workouts.filter(w => w.id !== dr.id);
+    save(); go('wList', { draft: null });
+  };
+}
+
+/* ================= Bottom sheets ================= */
+function openSheet(s) { state.sheet = s; state.pending = null; renderSheet(); }
+function closeSheet() { state.sheet = null; state.pending = null; renderSheet(); }
+function renderSheet() {
+  const el = $('sheet');
+  if (!state.sheet) { el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); return; }
+  el.hidden = false; document.body.classList.add('locked');
+  ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount })[state.sheet.type](el);
+}
+
+/* New / edit exercise */
+function sheetExForm(el) {
+  const s = state.sheet;
+  const ex = s.exId ? exById(s.exId) : null;
+  if (s.instructions === undefined) {
+    s.name = s.name || (ex ? ex.name : '');
+    s.instructions = ex ? ex.instructions : '';
+    s.video = ex ? ex.video : '';
+  }
+  const setCount = ex ? data.sets.filter(x => x.exId === ex.id).length : 0;
+  el.innerHTML = `<div class="backdrop"></div><div class="sheet" role="dialog" aria-label="${ex ? 'Edit exercise' : 'New exercise'}">
+    <div class="sheet-head"><button class="text-btn" id="sCancel">Cancel</button><b>${ex ? 'Edit exercise' : 'New exercise'}</b><button class="text-btn strong" id="sSave">Save</button></div>
+    <label class="field">Name<input id="fName" placeholder="e.g. Bench press" autocomplete="off"></label>
+    <div class="field">How is it tracked?
+      <div class="wheels">${wheelHTML('wA', TRACK_A)}<span class="x">×</span>${wheelHTML('wB', TRACK_B)}</div>
+    </div>
+    <label class="field">Instructions <span class="opt">(optional)</span><textarea id="fInstr" rows="4" placeholder="Setup, cues, things to remember…"></textarea></label>
+    <label class="field">Video instructions <span class="opt">(optional YouTube link)</span><input id="fVideo" inputmode="url" autocomplete="off" placeholder="https://youtube.com/watch?v=…"></label>
+    <div class="err" id="fErr"></div>
+    ${ex ? `<button class="danger ${state.pending === 'delEx' ? 'confirm' : ''}" id="sDel">${state.pending === 'delEx'
+        ? `Tap again to delete${setCount ? ` (also deletes ${plural(setCount, 'logged set')})` : ''}` : 'Delete exercise'}</button>` : ''}
+  </div>`;
+  const fName = $('fName'), fInstr = $('fInstr'), fVideo = $('fVideo');
+  fName.value = s.name; fInstr.value = s.instructions; fVideo.value = s.video;
+  fName.oninput = () => s.name = fName.value;
+  fInstr.oninput = () => s.instructions = fInstr.value;
+  fVideo.oninput = () => s.video = fVideo.value;
+  const curA = ex ? Math.max(0, TRACK_A.findIndex(o => o.v === ex.track[0])) : 0;
+  const curB = ex ? Math.max(0, TRACK_B.findIndex(o => o.v === ex.track[1])) : 0;
+  initWheel('wA', curA); initWheel('wB', curB);
+  if (!ex && !s.name) setTimeout(() => fName.focus(), 50);
+
+  $('sCancel').onclick = () => closeSheet();
+  $('sSave').onclick = () => {
+    const name = s.name.trim();
+    const err = $('fErr');
+    if (!name) { err.textContent = 'Give the exercise a name.'; return; }
+    if (data.exercises.some(e => e.name.toLowerCase() === name.toLowerCase() && e.id !== s.exId)) { err.textContent = 'An exercise with that name already exists.'; return; }
+    const video = s.video.trim();
+    if (video && !ytId(video)) { err.textContent = "That doesn't look like a YouTube link."; return; }
+    const track = [TRACK_A[wheelIndex('wA')].v, TRACK_B[wheelIndex('wB')].v];
+    let id = s.exId;
+    if (ex) Object.assign(ex, { name, track, instructions: s.instructions.trim(), video });
+    else { id = uid(); data.exercises.push({ id, name, track, instructions: s.instructions.trim(), video }); }
+    save();
+    const after = s.onSave;
+    state.sheet = null;
+    if (after) after(id); else render();
+  };
+  if ($('sDel')) $('sDel').onclick = () => {
+    if (state.pending !== 'delEx') { state.pending = 'delEx'; return renderSheet(); }
+    data.exercises = data.exercises.filter(e => e.id !== ex.id);
+    data.sets = data.sets.filter(x => x.exId !== ex.id);
+    data.workouts.forEach(w => { w.items = w.items.filter(i => i.exId !== ex.id); });
+    for (const k in data.days) { data.days[k].items = data.days[k].items.filter(i => i.exId !== ex.id); if (!data.days[k].items.length) delete data.days[k]; }
+    if (state.draft) state.draft.items = state.draft.items.filter(i => i.exId !== ex.id);
+    save(); state.sheet = null; go('eList');
+  };
+}
+
+/* Add exercise to a workout: pick exercise, then choose sets */
+const SET_OPTIONS = Array.from({ length: 10 }, (_, i) => ({ v: i + 1, label: `${i + 1}` }));
+function setsStepHTML(title, backLabel, button) {
+  return `<div class="backdrop"></div><div class="sheet" role="dialog" aria-label="${esc(title)}">
+    <div class="sheet-head"><button class="text-btn" id="sBack">${backLabel}</button><b>${esc(title)}</b><span style="width:60px"></span></div>
+    <div class="field" style="text-align:center">Number of sets</div>
+    <div class="wheels" style="max-width:160px;margin:0 auto">${wheelHTML('wSets', SET_OPTIONS)}</div>
+    <button class="primary full" id="sOk">${button}</button>
+  </div>`;
+}
+function sheetAddToWorkout(el) {
+  const s = state.sheet;
+  const dr = state.draft;
+  if (s.step === 'sets') {
+    const ex = exById(s.exId);
+    el.innerHTML = setsStepHTML(ex.name, '‹ Back', 'Add to workout');
+    initWheel('wSets', 2); // default 3 sets
+    $('sBack').onclick = () => { s.step = 'pick'; renderSheet(); };
+    $('sOk').onclick = () => { dr.items.push({ exId: ex.id, sets: SET_OPTIONS[wheelIndex('wSets')].v }); closeSheet(); render(); };
+    return;
+  }
+  el.innerHTML = `<div class="backdrop"></div><div class="sheet" role="dialog" aria-label="Add exercise">
+    <div class="sheet-head"><button class="text-btn" id="sCancel">Cancel</button><b>Add exercise</b><span style="width:60px"></span></div>
+    <input id="sq" class="search" placeholder="Search exercises" autocomplete="off">
+    <ul class="list pick" id="sres"></ul>
+  </div>`;
+  const q = $('sq');
+  q.value = s.q;
+  const inW = dr.items.map(i => i.exId);
+  const draw = () => {
+    s.q = q.value;
+    const term = q.value.trim().toLowerCase();
+    const list = data.exercises.filter(e => e.name.toLowerCase().includes(term)).sort(byName);
+    let html = `<li><button class="create" data-new="1">+ New exercise${q.value.trim() ? ` “${esc(q.value.trim())}”` : ''}</button></li>`;
+    html += list.map(e => inW.includes(e.id)
+      ? `<li><button class="already" disabled>${esc(e.name)} · already added</button></li>`
+      : `<li><button data-id="${e.id}">${esc(e.name)}</button></li>`).join('');
+    $('sres').innerHTML = html;
+    $('sres').querySelectorAll('[data-id]').forEach(b => b.onclick = () => { s.exId = b.dataset.id; s.step = 'sets'; renderSheet(); });
+    $('sres').querySelector('[data-new]').onclick = () => openSheet({
+      type: 'exForm', exId: null, name: q.value.trim(),
+      onSave: id => { state.sheet = { type: 'addToWorkout', step: 'sets', exId: id, q: '' }; render(); },
+    });
+  };
+  q.oninput = draw;
+  draw();
+  $('sCancel').onclick = () => closeSheet();
+}
+function sheetSetCount(el) {
+  const it = state.draft.items[state.sheet.index];
+  const ex = exById(it.exId);
+  el.innerHTML = setsStepHTML(ex ? ex.name : 'Exercise', 'Cancel', 'Save');
+  initWheel('wSets', it.sets - 1);
+  $('sBack').onclick = () => closeSheet();
+  $('sOk').onclick = () => { it.sets = SET_OPTIONS[wheelIndex('wSets')].v; closeSheet(); render(); };
+}
+
+render();
+
+/* ================= Offline support ================= */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
+</script>
+</body>
+</html>
