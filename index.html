@@ -383,6 +383,11 @@
   .switch:checked { background: var(--green); }
   .switch:checked::after { transform: translateX(20px); }
 
+  /* Finish */
+  .finish-btn { margin-top: 22px; }
+  .primary svg { flex: none; }
+  .finish-summary { text-align: center; font-size: 15px; color: var(--label2); margin: 0 6px 12px; }
+
   /* Floating tab bar */
   #dock {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom)); z-index: 10;
@@ -719,6 +724,7 @@ function renderDay() {
     <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ' (moved)'}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
     ${canMove ? `<button class="capsule glass move-btn" id="moveDay">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 16, 2.2)} Move to tomorrow</button>` : ''}
     ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
+    ${day.items.length && !isFinished(state.selected) && (logged.has(state.selected) || (day.session && day.session.start)) ? `<button class="primary" id="finishDay">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
     <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
 
   const shift = n => { state.weekStart = addDays(state.weekStart, 7 * n); render(); };
@@ -729,6 +735,7 @@ function renderDay() {
   $('addEx').onclick = () => go('picker', { pickerQuery: '', pickerMode: data.workouts.length ? 'workouts' : 'exercises' });
   app.querySelectorAll('.day').forEach(b => b.onclick = () => { state.selected = b.dataset.k; render(); });
   app.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => go('log', { logExId: b.dataset.ex }));
+  if ($('finishDay')) $('finishDay').onclick = () => openFinish(state.selected);
   if ($('moveDay')) $('moveDay').onclick = () => { shiftPlan(state.selected, 1); save(); render(); };
   app.querySelectorAll('[data-trash]').forEach(b => b.onclick = () => {
     const exId = b.dataset.trash, k = state.selected;
@@ -816,7 +823,10 @@ function logBodyHTML(m) {
       <button id="minus" aria-label="Remove a set" ${canMinus ? '' : 'disabled'}>−</button>
       <span>${plural(n, 'set')}</span>
       <button id="plus" aria-label="Add a set">+</button>
-    </div>`;
+    </div>
+    ${!isFinished(state.selected) && (m.idx === m.total - 1 || setsLeft(state.selected) === 0)
+      ? `<button class="primary finish-btn" id="finishHere">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>
+         ${m.idx === m.total - 1 ? '<div class="footnote" style="text-align:center">Last exercise. Swipe left for more options.</div>' : ''}` : ''}`;
 }
 
 function finishBodyHTML(k) {
@@ -882,6 +892,7 @@ function renderLog() {
   wirePager(k, idx);
 
   const changed = () => { save(); state.pending = null; render(); };
+  if ($('finishHere')) $('finishHere').onclick = () => openFinish(k);
   $('history').onclick = () => go('history', { stat: 'e1rm' });
   $('plus').onclick = () => { item.sets = n + 1; changed(); };
   $('minus').onclick = () => { if (!(n > 0 && !bySlot[n - 1])) return; item.sets = n - 1; delete drafts[n - 1]; changed(); };
@@ -1009,7 +1020,7 @@ function wireTimer(k) {
     const s = day.session;
     if (!s) { day.session = { start: Date.now() }; save(); return render(); }
     if (s.end) return openSheet({ type: 'duration', k });
-    if (state.views.today !== 'finish') go('finish', { slide: 'right' });
+    openFinish(k);
   };
   const s = dayOf(k).session;
   if (s && !s.end) timerTick = setInterval(() => { const t = $('timerText'); if (t) t.textContent = fmtDur(Date.now() - s.start); }, 1000);
@@ -1030,26 +1041,64 @@ function renderFinish() {
 /* Duration sheet: confirm/adjust the workout length to the minute */
 const HOUR_OPTS = Array.from({ length: 10 }, (_, i) => ({ v: i, label: String(i) }));
 const MIN_OPTS = Array.from({ length: 60 }, (_, i) => ({ v: i, label: pad(i) }));
+/* Finish workout: confirm the duration to the minute, and offer to log sets that were filled in but not ticked */
+function untickedSets(k) {
+  const out = [];
+  dayOf(k).items.forEach((it, idx) => {
+    const m = logModel(k, idx); if (!m) return;
+    for (let i = 0; i < m.n; i++) {
+      if (m.bySlot[i]) continue;
+      const v = suggest(m, i), w = parseW(v.w), r = parseR(v.r);
+      out.push({ exId: m.ex.id, slot: i, w, r, ok: !isNaN(w) && !isNaN(r) });
+    }
+  });
+  return out;
+}
+const isFinished = k => { const s = dayOf(k).session; return !!(s && s.end); };
+const openFinish = k => openSheet({ type: 'duration', k });
 function sheetDuration(el) {
-  const k = state.sheet.k;
-  const day = ensureDay(k);
+  const st = state.sheet, k = st.k;
+  const day = dayOf(k);
   const s = day.session;
-  const ms = s ? (s.end || Date.now()) - s.start : 0;
-  const mins = Math.max(0, Math.round(ms / 60000));
   const editing = s && s.end;
-  el.innerHTML = sheetOpen('Workout duration',
+  const loggedToday = data.sets.filter(x => x.date === k);
+  const unticked = editing ? [] : untickedSets(k);
+  const okUnticked = unticked.filter(u => u.ok);
+  if (st.logRest === undefined) st.logRest = okUnticked.length > 0;
+  // Default duration: the timer, or (if it never ran) the time since the first logged set
+  const firstTs = loggedToday.length ? Math.min(...loggedToday.map(x => x.ts)) : null;
+  const ms = s ? (s.end || Date.now()) - s.start : firstTs && k === todayKey() ? Date.now() - firstTs : 0;
+  const mins = Math.max(0, Math.round(ms / 60000));
+  const nothing = !loggedToday.length && !(st.logRest && okUnticked.length);
+  el.innerHTML = sheetOpen('Finish workout',
     `${closeBtn('sCancel')}<b>${editing ? 'Duration' : 'Finish workout'}</b>${okBtn('sSave', editing ? 'Save duration' : 'Finish workout')}`,
-    `<div class="finish-sub" style="margin:0 6px 4px">${s ? `Started ${new Date(s.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'The timer never started.'} · adjust if needed</div>
+    `${!editing ? `
+      <div class="finish-summary">${plural(loggedToday.length, 'set')} logged${unticked.length ? ` · ${plural(unticked.length, 'set')} not ticked` : ''}</div>
+      ${okUnticked.length ? `
+        <div class="group"><label class="set-row"><span class="lbl">Log the ${plural(okUnticked.length, 'unticked set')} as shown</span><input type="checkbox" class="switch" id="logRest" ${st.logRest ? 'checked' : ''}></label></div>
+        <div class="footnote">Uses the weight and reps shown in each row.${unticked.length > okUnticked.length ? ` ${plural(unticked.length - okUnticked.length, 'set')} without numbers will be skipped.` : ''}</div>` : ''}
+      ${nothing ? `<div class="footnote" style="color:var(--red)">No sets are logged, so this workout will show as empty. ${okUnticked.length ? 'Tick the sets you did, or log them above.' : 'Tick the sets you did first.'}</div>` : ''}
+      <div class="section">Duration</div>` : ''}
+     <div class="finish-sub" style="margin:0 6px 4px">${s ? `Started ${new Date(s.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : "The timer wasn't running"} · adjust if needed</div>
      <div class="group"><div class="wheels dur">
        ${wheelHTML('wH', HOUR_OPTS)}<span class="unit">h</span>${wheelHTML('wM', MIN_OPTS)}<span class="unit">min</span>
      </div></div>`);
   initWheel('wH', Math.min(9, Math.floor(mins / 60)));
   initWheel('wM', mins % 60);
+  if ($('logRest')) $('logRest').onchange = e => { st.logRest = e.target.checked; st.h = wheelIndex('wH'); st.m = wheelIndex('wM'); renderSheet(); initWheel('wH', st.h); initWheel('wM', st.m); };
   $('sCancel').onclick = () => closeSheet();
   $('sSave').onclick = () => {
     const total = (HOUR_OPTS[wheelIndex('wH')].v * 60 + MIN_OPTS[wheelIndex('wM')].v) * 60000;
+    const d = ensureDay(k);
+    if (!editing && st.logRest) {
+      let ts = Date.now();
+      okUnticked.forEach(u => {
+        data.sets.push({ id: uid(), exId: u.exId, date: k, slot: u.slot, weight: fromU(u.w), reps: u.r, ts: ts++ });
+        delete (state.drafts[u.exId + '|' + k] || {})[u.slot];
+      });
+    }
     const end = s && s.end ? s.end : Date.now();
-    day.session = { start: end - total, end };
+    d.session = { start: end - total, end };
     save();
     state.sheet = null;
     // TODO: show a workout summary here
@@ -1845,7 +1894,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.13.2';
+const APP_VERSION = '0.14';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2054,7 +2103,7 @@ const removeLink = l => cloud.fb.deleteDoc(cloud.fb.doc(cloud.db, 'links', l.id)
 // A friend's training (read-only): exercises + the last 120 days of sets and days
 async function loadFriend(uid, force) {
   const c = friends.cache[uid];
-  if (c && !force && Date.now() - c.at < 5 * 60 * 1000) return c;
+  if (c && !force && Date.now() - c.at < 60 * 1000) return c;
   const fb = cloud.fb, col = n => fb.collection(cloud.db, 'users', uid, n);
   const cutoff = dk(addDays(new Date(), -120));
   const [ex, sets, days] = await Promise.all([
@@ -2141,6 +2190,7 @@ function renderFriend() {
   if (!l) return go('friends');
   const me = cloud.user.uid, o = otherOf(l), name = nameOf(l);
   const theyShare = l.share && l.share[o], iShare = !!(l.share && l.share[me]);
+  if (friends.cache[o] && Date.now() - friends.cache[o].at > 60 * 1000 && !state.friendLoading) delete friends.cache[o];
   const c = friends.cache[o];
   let body = '';
   if (!theyShare) body = `<div class="group"><div class="empty">${esc(name)} isn't sharing their training with you.</div></div>`;
@@ -2148,7 +2198,8 @@ function renderFriend() {
   else if (!c) body = `<div class="group"><div class="empty">Loading ${esc(name)}'s training…</div></div>`;
   else {
     const since30 = dk(addDays(new Date(), -30));
-    const dates = [...new Set(c.sets.map(s => s.date))].sort().reverse();
+    const sessionDates = Object.keys(c.days).filter(k => c.days[k].session && (c.days[k].session.end || k === todayKey()));
+    const dates = [...new Set([...c.sets.map(s => s.date), ...sessionDates])].sort().reverse();
     const recent = dates.filter(d => d >= since30);
     const exName = id => { const e = c.exercises.find(x => x.id === id); return e ? e.name : 'Exercise'; };
     const usedEx = c.exercises.filter(e => c.sets.some(s => s.exId === e.id)).sort(byName);
@@ -2160,9 +2211,10 @@ function renderFriend() {
         const ss = c.sets.filter(s => s.date === k), d = c.days[k];
         const byEx = [...new Set(ss.map(s => s.exId))];
         const title = d && d.workouts && d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Workout';
-        const dur = d && d.session && d.session.end ? ` · ${fmtMins(d.session.end - d.session.start)}` : '';
+        const dur = d && d.session ? (d.session.end ? ` · ${fmtMins(d.session.end - d.session.start)}` : ' · <span style="color:var(--green)">in progress</span>') : '';
         return `<div class="hcard"><div class="hcard-head"><b>${title}</b><span>${fmtDayYear(k)}${dur}</span></div>
-          ${byEx.map(id => `<div class="hset"><span class="fx">${esc(exName(id))}</span><span class="v">${ss.filter(s => s.exId === id).sort((a, b) => a.slot - b.slot).map(s => `${W(s.weight)}×${s.reps}`).join(', ')}</span></div>`).join('')}</div>`;
+          ${byEx.length ? byEx.map(id => `<div class="hset"><span class="fx">${esc(exName(id))}</span><span class="v">${ss.filter(s => s.exId === id).sort((a, b) => a.slot - b.slot).map(s => `${W(s.weight)}×${s.reps}`).join(', ')}</span></div>`).join('')
+            : '<div class="hset"><span style="color:var(--label2)">No sets logged</span></div>'}</div>`;
       }).join('') : `<div class="group"><div class="empty">No workouts in the last 4 months.</div></div>`}
       ${usedEx.length ? `<div class="section">Exercises</div><div class="group">${usedEx.map(e => {
         const best = Math.max(...c.sets.filter(s => s.exId === e.id).map(e1rm));
