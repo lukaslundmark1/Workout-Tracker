@@ -258,15 +258,32 @@
   /* Exercise pager */
   .eyebrow { font-size: 13px; font-weight: 600; color: var(--label2); margin: 2px 2px 2px; }
   .eyebrow + .large-title { margin-top: 0; }
-  body.has-exnav #app { padding-bottom: calc(180px + env(safe-area-inset-bottom)); }
-  .exnav { position: fixed; left: 50%; transform: translateX(-50%); width: min(calc(100% - 40px), 560px); bottom: calc(86px + env(safe-area-inset-bottom)); display: flex; gap: 10px; z-index: 9; pointer-events: none; }
-  .exnav-btn { pointer-events: auto; max-width: 48%; padding: 0 14px; font-size: 15px; }
-  .exnav-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .exnav-btn[hidden] { display: none; }
   .slide-wrap.from-right { animation: fromRight .28s cubic-bezier(.2,.9,.3,1); }
   .slide-wrap.from-left { animation: fromLeft .28s cubic-bezier(.2,.9,.3,1); }
   @keyframes fromRight { from { transform: translateX(40px); opacity: 0; } }
   @keyframes fromLeft { from { transform: translateX(-40px); opacity: 0; } }
+
+  /* Screen transitions: deeper screens slide up from the bottom, going back slides them down */
+  #app { position: relative; z-index: 2; background: var(--bg); min-height: 100vh; }
+  .ghost { position: fixed; left: 0; right: 0; margin: 0 auto; max-width: 600px; padding: 0 16px; z-index: 1; pointer-events: none; background: var(--bg); }
+  .ghost.top { z-index: 3; box-shadow: 0 -10px 40px rgba(0,0,0,.15); border-radius: 28px 28px 0 0; }
+  .enter-up { animation: enterUp .42s cubic-bezier(.2,.9,.25,1); box-shadow: 0 -10px 40px rgba(0,0,0,.15); border-radius: 28px 28px 0 0; }
+  .recede { animation: recede .42s cubic-bezier(.2,.9,.25,1) forwards; }
+  .leave-down { animation: leaveDown .36s cubic-bezier(.4,0,.8,.6) forwards; }
+  .under { animation: under .36s cubic-bezier(.2,.9,.25,1); }
+  @keyframes enterUp { from { transform: translateY(100vh); } }
+  @keyframes recede { to { transform: scale(.94); opacity: .5; } }
+  @keyframes leaveDown { to { transform: translateY(100vh); } }
+  @keyframes under { from { transform: scale(.94); opacity: .5; } }
+
+  /* End-of-workout page */
+  .finish { display: flex; flex-direction: column; align-items: stretch; padding-top: 8vh; }
+  .finish-icon { width: 88px; height: 88px; border-radius: 50%; margin: 0 auto 18px; display: flex; align-items: center; justify-content: center; background: var(--fill); color: var(--label3); }
+  .finish-icon.done { background: var(--green); color: #fff; }
+  .finish-sub { text-align: center; color: var(--label2); font-size: 15px; margin-bottom: 14px; }
+  .wheels.dur { justify-content: center; }
+  .wheels.dur .wheel { flex: 0 0 72px; }
+  .wheels.dur .unit { font-size: 17px; font-weight: 600; color: var(--label2); width: 40px; }
 
   /* Session timer */
   .timer { height: 40px; padding: 0 14px; font-size: 15px; font-weight: 600; font-family: var(--rounded); font-variant-numeric: tabular-nums; gap: 6px; }
@@ -274,7 +291,6 @@
   .timer .rec { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: pulse 1.6s infinite; }
   @keyframes pulse { 50% { opacity: .3; } }
   .timer.ended { color: var(--green); }
-  .timer.confirm { background: var(--red); color: #fff; box-shadow: none; }
 
   /* Floating tab bar */
   #dock {
@@ -418,22 +434,45 @@ const app = $('app');
 const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList' };
 
 function render() {
-  const VIEWS = { day: renderDay, log: renderLog, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
+  const VIEWS = { day: renderDay, log: renderLog, finish: renderFinish, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
                   wList: renderWorkoutList, wEdit: renderWorkoutEdit, eList: renderExerciseList, eDetail: renderExerciseDetail };
   clearInterval(timerTick);
-  document.body.classList.remove('has-exnav');
   app.ontouchstart = app.ontouchend = null;
   VIEWS[state.views[state.tab]]();
   if (saveError) app.insertAdjacentHTML('afterbegin', `<div id="status">${saveError}</div>`);
   renderDock();
   renderSheet();
 }
+const DEPTH = { day: 0, wList: 0, eList: 0, log: 1, finish: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, history: 2 };
+const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+// Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
+function ghost(onTop) {
+  const g = app.cloneNode(true);
+  g.removeAttribute('id');
+  g.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
+  g.className = 'ghost' + (onTop ? ' top' : '');
+  g.style.top = app.getBoundingClientRect().top + 'px';
+  g.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(g);
+  return g;
+}
 function go(view, extra = {}) {
+  const from = state.views[state.tab];
+  const dir = extra.anim || (DEPTH[view] > DEPTH[from] ? 'up' : DEPTH[view] < DEPTH[from] ? 'down' : null);
+  delete extra.anim;
+  const g = dir && !reduceMotion() ? ghost(dir === 'down') : null;
   Object.assign(state, extra);
   state.views[state.tab] = view;
   state.pending = null;
   render();
   window.scrollTo(0, 0);
+  if (!g) return;
+  document.querySelectorAll('.ghost').forEach(x => { if (x !== g) x.remove(); });
+  app.classList.remove('enter-up', 'under');
+  void app.offsetWidth;
+  app.classList.add(dir === 'up' ? 'enter-up' : 'under');
+  g.classList.add(dir === 'up' ? 'recede' : 'leave-down');
+  setTimeout(() => { g.remove(); app.classList.remove('enter-up', 'under'); }, 420);
 }
 
 /* ================= Tab bar ================= */
@@ -564,7 +603,7 @@ function renderDay() {
     </header>
     <div class="week" id="week">${days}</div>
     <div class="day-title">${fmtLong(state.selected)}</div>
-    <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtDur(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
+    <div class="day-sub">${day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : (day.items.length ? 'Custom workout' : 'Rest day')}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
     ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
     <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
 
@@ -584,7 +623,7 @@ function renderDay() {
     d.items = d.items.filter(i => i.exId !== exId);
     data.sets = data.sets.filter(x => !(x.exId === exId && x.date === k));
     delete state.drafts[exId + '|' + k];
-    if (!d.items.length) delete data.days[k]; else syncSession(k);
+    if (!d.items.length) delete data.days[k];
     save(); state.pending = null; render();
   });
   if ($('dayList')) makeSortable($('dayList'), (from, to) => {
@@ -646,8 +685,6 @@ function renderLog() {
   const canMinus = n > 0 && !bySlot[n - 1];
   const vid = ytId(ex.video);
   const hasInstr = ex.instructions || vid;
-  const prevEx = idx > 0 ? exById(day.items[idx - 1].exId) : null;
-  const nextEx = idx < day.items.length - 1 ? exById(day.items[idx + 1].exId) : null;
 
   app.innerHTML = `
     <header class="nav">${backBtn(fmtShort(k))}<span class="spacer"></span>${timerHTML(k)}</header>
@@ -673,32 +710,23 @@ function renderLog() {
       <button id="plus" aria-label="Add a set">+</button>
     </div>
     </div>
-    <div class="exnav">
-      <button class="capsule glass exnav-btn" id="prevEx" ${prevEx ? '' : 'hidden'} aria-label="Previous exercise">${ICON_PREV}<span>${prevEx ? esc(prevEx.name) : ''}</span></button>
-      <span class="spacer"></span>
-      <button class="capsule glass exnav-btn" id="nextEx" ${nextEx ? '' : 'hidden'} aria-label="Next exercise"><span>${nextEx ? esc(nextEx.name) : ''}</span>${ICON_NEXT}</button>
-    </div>`;
+`;
   state.slide = null;
-  document.body.classList.add('has-exnav');
 
-  const goTo = (j, dir) => { if (j < 0 || j >= day.items.length) return; go('log', { logExId: day.items[j].exId, slide: dir }); };
+  // Swiping past the last exercise opens the end-of-workout page
+  const goTo = (j, dir) => {
+    if (j < 0) return;
+    if (j >= day.items.length) return go('finish', { slide: 'right' });
+    go('log', { logExId: day.items[j].exId, slide: dir });
+  };
   $('back').onclick = () => go('day');
   $('history').onclick = () => go('history', { stat: 'e1rm' });
-  $('prevEx').onclick = () => goTo(idx - 1, 'left');
-  $('nextEx').onclick = () => goTo(idx + 1, 'right');
   wireTimer(k);
-  const changed = () => { syncSession(k); save(); state.pending = null; render(); };
+  const changed = () => { save(); state.pending = null; render(); };
   $('plus').onclick = () => { item.sets = n + 1; changed(); };
   $('minus').onclick = () => { if (!canMinus) return; item.sets = n - 1; delete drafts[n - 1]; changed(); };
 
-  // Swipe left/right anywhere on the page (except in a text field) to change exercise
-  let t0 = null;
-  app.ontouchstart = e => { t0 = e.target.closest('input, textarea, .chart') ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
-  app.ontouchend = e => {
-    if (!t0) return;
-    const dx = e.changedTouches[0].clientX - t0.x, dy = e.changedTouches[0].clientY - t0.y; t0 = null;
-    if (Math.abs(dx) > 70 && Math.abs(dy) < 50) goTo(dx < 0 ? idx + 1 : idx - 1, dx < 0 ? 'right' : 'left');
-  };
+  onSwipe(() => goTo(idx + 1, 'right'), () => goTo(idx - 1, 'left'));
 
   app.querySelectorAll('.setrow').forEach(row => {
     const i = Number(row.dataset.i);
@@ -733,7 +761,6 @@ function renderLog() {
       const s = ensureDay(k);
       if (!s.session) s.session = { start: Date.now() }; // first logged set starts the timer
       changed();
-      // TODO: show a workout summary here once the last set of the workout is logged
     };
   });
 }
@@ -744,39 +771,97 @@ const fmtDur = ms => {
   const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
   return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 };
-function workoutComplete(k) {
-  const day = dayOf(k);
-  return day.items.length > 0 && day.items.every(it => {
-    const logged = setsFor(it.exId, k).length;
-    return logged > 0 && logged >= (it.sets || 0);
-  });
-}
-// The timer stops by itself when every planned set is done, and resumes if that stops being true.
-function syncSession(k) {
-  const s = data.days[k] && data.days[k].session;
-  if (!s || !s.start) return;
-  if (workoutComplete(k)) { if (!s.end) { s.end = Date.now(); s.auto = true; } }
-  else if (s.end && s.auto) { delete s.end; delete s.auto; }
-}
+const fmtMins = ms => { const m = Math.round(ms / 60000), h = Math.floor(m / 60); return h ? `${h} h ${m % 60} min` : `${m} min`; };
+const setsLeft = k => dayOf(k).items.reduce((a, it) => a + Math.max(0, (it.sets || 0) - setsFor(it.exId, k).length), 0);
+
+// The timer runs until "Finish workout" (end page or tapping the running timer).
 function timerHTML(k) {
   const s = dayOf(k).session;
   if (!s) return `<button class="capsule glass timer" id="timer" aria-label="Start session timer">${ICON_TIMER}<span>Start</span></button>`;
-  if (s.end) return `<button class="capsule glass timer ended" id="timer" aria-label="Session finished">${ICON_OK}<span>${fmtDur(s.end - s.start)}</span></button>`;
-  if (state.pending === 'finish') return `<button class="capsule glass timer confirm" id="timer">Finish workout?</button>`;
+  if (s.end) return `<button class="capsule glass timer ended" id="timer" aria-label="Workout finished, tap to change duration">${ICON_OK}<span>${fmtMins(s.end - s.start)}</span></button>`;
   return `<button class="capsule glass timer running" id="timer" aria-label="Session time, tap to finish"><span class="rec"></span><span id="timerText">${fmtDur(Date.now() - s.start)}</span></button>`;
 }
 function wireTimer(k) {
-  const btn = $('timer');
-  btn.onclick = () => {
+  $('timer').onclick = () => {
     const day = ensureDay(k);
     const s = day.session;
     if (!s) { day.session = { start: Date.now() }; save(); return render(); }
-    if (s.end) return;
-    if (state.pending !== 'finish') { state.pending = 'finish'; return render(); }
-    s.end = Date.now(); s.auto = false; save(); state.pending = null; render();
+    if (s.end) return openSheet({ type: 'duration', k });
+    if (state.views.today !== 'finish') go('finish', { slide: 'right' });
   };
   const s = dayOf(k).session;
   if (s && !s.end) timerTick = setInterval(() => { const t = $('timerText'); if (t) t.textContent = fmtDur(Date.now() - s.start); }, 1000);
+}
+
+/* Swipe left/right anywhere on the page (except in a text field) */
+function onSwipe(fwd, back) {
+  let t0 = null;
+  app.ontouchstart = e => { t0 = e.target.closest('input, textarea, .chart, .grip') ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY }; };
+  app.ontouchend = e => {
+    if (!t0) return;
+    const dx = e.changedTouches[0].clientX - t0.x, dy = e.changedTouches[0].clientY - t0.y; t0 = null;
+    if (Math.abs(dx) > 60 && Math.abs(dy) < 60) (dx < 0 ? fwd : back)();
+  };
+}
+
+/* ================= TODAY: end-of-workout page (swipe past the last exercise) ================= */
+function renderFinish() {
+  const k = state.selected;
+  const day = dayOf(k);
+  if (!day.items.length) return go('day');
+  const s = day.session;
+  const left = setsLeft(k);
+  const done = s && s.end;
+  app.innerHTML = `
+    <header class="nav">${backBtn(fmtShort(k))}<span class="spacer"></span>${timerHTML(k)}</header>
+    <div class="slide-wrap ${state.slide ? 'from-' + state.slide : ''}">
+      <div class="finish">
+        <div class="finish-icon ${done ? 'done' : ''}">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 44, 2.6)}</div>
+        <div class="large-title" style="text-align:center;margin-bottom:6px">${done ? 'Workout finished' : 'End of workout'}</div>
+        <div class="finish-sub">${done ? `Finished in ${fmtMins(s.end - s.start)}` : left ? `${plural(left, 'planned set')} not logged yet` : 'Every planned set is logged'}</div>
+        ${done ? `<button class="primary" id="editDur">Change duration</button>`
+               : `<button class="primary" id="finishW">Finish workout</button>`}
+        <button class="btn-tinted" id="addMore">${ICON_PLUS} Add exercise</button>
+      </div>
+    </div>`;
+  state.slide = null;
+  $('back').onclick = () => go('day');
+  wireTimer(k);
+  const last = () => go('log', { logExId: day.items[day.items.length - 1].exId, slide: 'left' });
+  onSwipe(() => {}, last);
+  if ($('finishW')) $('finishW').onclick = () => openSheet({ type: 'duration', k });
+  if ($('editDur')) $('editDur').onclick = () => openSheet({ type: 'duration', k });
+  $('addMore').onclick = () => go('picker', { pickerQuery: '', pickerMode: 'exercises', anim: 'up' });
+}
+
+/* Duration sheet: confirm/adjust the workout length to the minute */
+const HOUR_OPTS = Array.from({ length: 10 }, (_, i) => ({ v: i, label: String(i) }));
+const MIN_OPTS = Array.from({ length: 60 }, (_, i) => ({ v: i, label: pad(i) }));
+function sheetDuration(el) {
+  const k = state.sheet.k;
+  const day = ensureDay(k);
+  const s = day.session;
+  const ms = s ? (s.end || Date.now()) - s.start : 0;
+  const mins = Math.max(0, Math.round(ms / 60000));
+  const editing = s && s.end;
+  el.innerHTML = sheetOpen('Workout duration',
+    `${closeBtn('sCancel')}<b>${editing ? 'Duration' : 'Finish workout'}</b>${okBtn('sSave', editing ? 'Save duration' : 'Finish workout')}`,
+    `<div class="finish-sub" style="margin:0 6px 4px">${s ? `Started ${new Date(s.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'The timer never started.'} · adjust if needed</div>
+     <div class="group"><div class="wheels dur">
+       ${wheelHTML('wH', HOUR_OPTS)}<span class="unit">h</span>${wheelHTML('wM', MIN_OPTS)}<span class="unit">min</span>
+     </div></div>`);
+  initWheel('wH', Math.min(9, Math.floor(mins / 60)));
+  initWheel('wM', mins % 60);
+  $('sCancel').onclick = () => closeSheet();
+  $('sSave').onclick = () => {
+    const total = (HOUR_OPTS[wheelIndex('wH')].v * 60 + MIN_OPTS[wheelIndex('wM')].v) * 60000;
+    const end = s && s.end ? s.end : Date.now();
+    day.session = { start: end - total, end };
+    save();
+    state.sheet = null;
+    // TODO: show a workout summary here
+    go('day');
+  };
 }
 
 /* ================= TODAY: add exercise / workout ================= */
@@ -1092,7 +1177,7 @@ function renderSheet() {
   const el = $('sheet');
   if (!state.sheet) { el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); return; }
   el.hidden = false; document.body.classList.add('locked');
-  ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount })[state.sheet.type](el);
+  ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration })[state.sheet.type](el);
 }
 const sheetOpen = (label, head, body) => `<div class="backdrop"></div><div class="sheet" role="dialog" aria-label="${esc(label)}"><div class="sheet-head">${head}</div>${body}</div>`;
 
