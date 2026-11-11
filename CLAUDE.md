@@ -9,7 +9,7 @@ A workout tracker and planner PWA for **Lukas** (the owner), his girlfriend and 
 
 - Repo: `lukaslundmark1/Workout-Tracker`, branch `main`, every file at the root. Pushing to `main` deploys it.
 - Live site (GitHub Pages): https://lukaslundmark1.github.io/Workout-Tracker/
-- Current version: **v0.29.1** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
+- Current version: **v0.30** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
 - Firebase project `workout-tracker-705ae`, free Spark plan. Auth is Google + email/password; Firestore is in europe-north1. Lukas changes console settings himself. Tell him exactly what to click.
 
 ## How Lukas works (important)
@@ -58,6 +58,7 @@ A workout tracker and planner PWA for **Lukas** (the owner), his girlfriend and 
 - `firestore.rules`: security rules. **They only take effect when Lukas pastes them into Firebase console → Firestore → Rules → Publish.** Whenever you change them, tell him to do that, step by step. He confirmed on 2026-11-11 that the current rules are published.
 - `build.py`: **run `python3 build.py` once before every commit that changes app.js, index.html or sw.js.** It stamps `app.js?v=<hash>` into index.html, rewrites the file list in sw.js, bumps the cache name so installed apps update, and checks the CSP is still there.
 - `dev/`: test tools that aren't part of the app (details in `dev/README.md`).
+- `native/`: the iPhone app shell (Capacitor) that loads the live site; Lukas builds it in Xcode on his MacBook and re-runs it weekly (free Apple ID). See `native/README.md`. In app.js, native-only behaviour is behind `NATIVE`; the web app must keep working without it. If you change anything in `native/`, tell Lukas to run `npx cap sync ios` and rebuild.
 
 ## Rules that keep things working
 - **Logged sets:** always look them up through the index: `setsOf(exId, day)`, `setsOn(day)`, `hasSets(day)`, `exSets(exId)`, `exDates(exId)`, `prevDateOf(exId, day)`. Never filter `data.sets` in screen code. Add sets with `data.sets.push(...)`. Remove sets by assigning a new array (`data.sets = data.sets.filter(...)`). Never splice or reorder in place. Editing weight or reps of an existing set in place is fine.

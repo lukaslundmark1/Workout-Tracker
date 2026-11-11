@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Training</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; height: 100%; background: #f2f2f7; color: #000; font: 17px -apple-system, system-ui, sans-serif; }
+  @media (prefers-color-scheme: dark) { html, body { background: #000; color: #fff; } p { color: rgba(235,235,245,.6) !important; } }
+  main { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 32px; box-sizing: border-box; }
+  h1 { font-size: 22px; margin: 0 0 8px; } p { margin: 0 0 24px; color: rgba(60,60,67,.6); line-height: 1.4; }
+  button { font: inherit; font-weight: 600; color: #fff; background: #007aff; border: 0; border-radius: 26px; height: 52px; padding: 0 32px; }
+</style></head>
+<body><main>
+  <h1>Can't open Training</h1>
+  <p>The app needs the internet the very first time it opens. After that it works offline.</p>
+  <button id="retry">Try again</button>
+</main>
+<script>
+  // Shown only if the app couldn't be loaded at all (first launch without internet). Tries again by itself, too.
+  const go = () => { location.href = 'https://lukaslundmark1.github.io/Workout-Tracker/'; };
+  document.getElementById('retry').onclick = go;
+  addEventListener('online', go);
+  setInterval(() => { if (navigator.onLine) go(); }, 5000);
+</script>
+</body></html>

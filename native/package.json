@@ -1,0 +1,18 @@
+{
+  "name": "training-native",
+  "private": true,
+  "description": "The iPhone app shell for Training tracker (see native/README.md). The app itself is the live web app.",
+  "scripts": {
+    "sync": "cap sync ios",
+    "open": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.0",
+    "@capacitor/ios": "8.6.0",
+    "@capacitor/haptics": "8.0.2",
+    "@capacitor/status-bar": "8.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.0"
+  }
+}

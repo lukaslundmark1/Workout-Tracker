@@ -457,6 +457,14 @@ function animateSegs(root = app) {
    your tap lands on the label, the label flips the switch, iOS ticks, and the tap carries on to the button as usual.
    That gives one tick per tap; haptic() itself still ticks from code on older iPhones and covers non-tap moments there. */
 const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+/* Inside the iPhone app (the native shell in native/, which loads this same web app) the phone's own APIs are there:
+   real haptics (every pattern, any moment, not just taps) and the status bar. Capacitor's bridge is put on the page by the app
+   itself, so nothing extra is loaded here; in Safari / the home-screen web app NATIVE is false and nothing below changes. */
+const NATIVE = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform() && window.Capacitor.nativePromise);
+const nativeCall = (plugin, method, opts) => { try { const r = window.Capacitor.nativePromise(plugin, method, opts || {}); if (r && r.catch) r.catch(() => {}); } catch (e) {} };
+if (NATIVE) nativeCall('Haptics', 'selectionStart');   // readies the light "selection" tick
+const NATIVE_HAPTIC = { select: ['selectionChanged'], impact: ['impact', { style: 'MEDIUM' }], success: ['notification', { type: 'SUCCESS' }],
+  warn: ['notification', { type: 'WARNING' }], error: ['notification', { type: 'ERROR' }] };
 let hxTapAt = 0;   // when a tap last landed on one of those labels (that tap already ticked)
 const haptic = (() => {
   let lbl = null, last = 0;
@@ -472,6 +480,7 @@ const haptic = (() => {
       const now = performance.now();
       if (now - last < 40) return;            // two at once would feel like one mushy buzz
       last = now;
+      if (NATIVE) { const [m, o] = NATIVE_HAPTIC[kind] || NATIVE_HAPTIC.select; nativeCall('Haptics', m, o); return; }
       if (navigator.vibrate) { navigator.vibrate(VIB[kind] || VIB.select); return; }
       if (now - hxTapAt < 400) return;        // this tap already ticked through its label
       (TICKS[kind] || TICKS.select).forEach(t => t ? setTimeout(tick, t) : tick());
@@ -509,7 +518,7 @@ function hapticTargets() {
     l.appendChild(sw); el.appendChild(l);
   }
 }
-if (IS_IOS) {
+if (IS_IOS && !NATIVE) {
   // Whatever gets drawn (screens, sheets, the number pad, the tab bar), its controls get their labels before you can tap them
   let q = 0;
   new MutationObserver(() => { if (!q) q = requestAnimationFrame(() => { q = 0; hapticTargets(); }); }).observe(document.body, { childList: true, subtree: true });
@@ -2407,8 +2416,8 @@ function sheetSignin(el) {
   const create = s.mode === 'create';
   el.innerHTML = sheetOpen('Sign in', `${closeBtn('sCancel')}<b>${create ? 'Create account' : 'Sign in'}</b><span></span>`, `
     <div class="finish-sub" style="margin:0 8px 14px">Back up your workouts, use them on all your devices, and add friends.</div>
-    <button class="google-btn" id="gBtn">${ICON_GOOGLE}<span>Continue with Google</span></button>
-    <div class="or"><span>or use email</span></div>
+    ${NATIVE ? '' : `<button class="google-btn" id="gBtn">${ICON_GOOGLE}<span>Continue with Google</span></button>
+    <div class="or"><span>or use email</span></div>`}
     <div class="group">
       <input class="field-input" id="aEmail" type="email" inputmode="email" autocomplete="email" placeholder="Email" value="${esc(s.email || '')}">
       <div style="border-top:.5px solid var(--sep);margin:0 18px"></div>
@@ -2417,6 +2426,7 @@ function sheetSignin(el) {
     <div class="err" id="aErr">${esc(s.err || cloud.authError || '')}</div>
     ${s.msg ? `<div class="finish-sub" style="margin:10px 8px 0;color:var(--green)">${esc(s.msg)}</div>` : ''}
     <button class="primary" id="aGo">${create ? 'Create account' : 'Sign in'}</button>
+    ${NATIVE ? `<div class="footnote" style="text-align:center">Google doesn't allow signing in inside apps like this one. If you normally use Google, tap “Forgot password?” with your Google email to give the same account a password.</div>` : ''}
     <div class="auth-links">
       <button class="tint" id="aMode">${create ? 'I already have an account' : 'Create an account'}</button>
       ${create ? '' : '<button class="tint" id="aForgot">Forgot password?</button>'}
@@ -2429,7 +2439,7 @@ function sheetSignin(el) {
   $('sCancel').onclick = () => closeSheet();
   $('aMode').onclick = () => { s.mode = create ? 'signin' : 'create'; s.err = ''; s.msg = ''; renderSheet(); };
   if (!cloud.ready) { $('aErr').textContent = 'Sign-in is still loading — check your connection and try again.'; }
-  $('gBtn').onclick = async () => {
+  if ($('gBtn')) $('gBtn').onclick = async () => {
     if (!cloud.ready) return;
     busy(true);
     const provider = new cloud.fb.GoogleAuthProvider();
@@ -2457,11 +2467,12 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.29.1';
+const APP_VERSION = '0.30';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   const m = $('themeColor'); if (m) m.content = dark ? '#000000' : '#f2f2f7';
+  if (NATIVE) nativeCall('StatusBar', 'setStyle', { style: dark ? 'DARK' : 'LIGHT' });   // light text on dark, dark text on light
 }
 const segHTML = (key, opts) => `<div class="seg sm" data-set="${key}">${opts.map(([v, l]) =>
   `<button data-v="${v}" class="${String(data.settings[key]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;

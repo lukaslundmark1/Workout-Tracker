@@ -1,0 +1,18 @@
+{
+  "appId": "io.github.lukaslundmark1.training",
+  "appName": "Training",
+  "webDir": "www",
+  "server": {
+    "url": "https://lukaslundmark1.github.io/Workout-Tracker/",
+    "errorPath": "offline.html"
+  },
+  "ios": {
+    "contentInset": "never",
+    "limitsNavigationsToAppBoundDomains": true,
+    "backgroundColor": "#000000",
+    "scrollEnabled": true
+  },
+  "plugins": {
+    "StatusBar": { "overlaysWebView": true }
+  }
+}
