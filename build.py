@@ -34,7 +34,7 @@ if n != 1:
 m = re.search(r"const CACHE = 'tt-v(\d+)';", sws)
 if not m:
     sys.exit('sw.js: CACHE name not found')
-if f'app.js?v={v}' not in sw.read_text():          # only bump when the app actually changed
+if f'app.js?v={v}' not in sw.read_text() or html != index.read_text():   # bump when the code or the page changed
     sws = sws.replace(m.group(0), f"const CACHE = 'tt-v{int(m.group(1)) + 1}';")
 
 index.write_text(html)

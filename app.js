@@ -243,7 +243,15 @@ function polish() {
     const ind = document.createElement('span'); ind.className = 'week-ind' + (sel.classList.contains('today') ? ' today' : ''); ind.setAttribute('aria-hidden', 'true');
     week.prepend(ind); week.classList.add('has-ind');
     const key = dk(state.weekStart), r = { x: sel.offsetLeft, w: sel.offsetWidth };
-    slideTo(ind, weekPos && weekPos.key === key ? weekPos : null, r);
+    const prev = weekPos && weekPos.key === key ? weekPos : null;
+    slideTo(ind, prev, r);
+    // The strip is redrawn on every tap, so the colour change is staged by hand to stay in step with the capsule
+    if (prev && prev.x !== r.x && !reduceMotion()) {
+      const days = [...week.querySelectorAll('.day')], left = days.find(d => d.offsetLeft === prev.x);
+      sel.classList.add('arriving'); if (left) left.classList.add('leaving');
+      void week.offsetWidth;
+      requestAnimationFrame(() => { sel.classList.remove('arriving'); if (left) left.classList.remove('leaving'); });
+    }
     weekPos = { key, ...r };
   }
   // Opening a screen: headline numbers count up

@@ -288,10 +288,10 @@
   /* Exercise pager */
   .eyebrow { font-size: 13px; font-weight: 600; color: var(--label2); margin: 2px 2px 2px; }
   .eyebrow + .large-title { margin-top: 0; }
-  .slide-wrap.from-right { animation: fromRight .4s var(--spring); }
-  .slide-wrap.from-left { animation: fromLeft .4s var(--spring); }
-  @keyframes fromRight { from { transform: translateX(40px); opacity: 0; } }
-  @keyframes fromLeft { from { transform: translateX(-40px); opacity: 0; } }
+  .slide-wrap.from-right { animation: fromRight .36s var(--spring); }
+  .slide-wrap.from-left { animation: fromLeft .36s var(--spring); }
+  @keyframes fromRight { from { transform: translateX(14px); opacity: .35; } }
+  @keyframes fromLeft { from { transform: translateX(-14px); opacity: .35; } }
 
   /* Screen transitions: deeper screens slide up from the bottom, going back slides them down */
   #app { position: relative; z-index: 2; background: var(--bg); min-height: 100vh; }
@@ -547,10 +547,23 @@
   .week { position: relative; }
   .week.has-ind .day.sel, .week.has-ind .day.sel.today { background: transparent; }
   .week-ind { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 22px; background: var(--label); z-index: 0;
-    transition: transform .5s var(--bounce-soft), width .5s var(--bounce-soft), background .25s ease; box-shadow: 0 6px 14px -8px rgba(0,0,0,.35); }
+    transition: transform .42s var(--spring), width .42s var(--spring), background .25s ease; box-shadow: 0 6px 14px -8px rgba(0,0,0,.35); will-change: transform; }
   .week-ind.today { background: var(--red); box-shadow: 0 8px 16px -8px var(--red); }
   .week .day { position: relative; z-index: 1; }
-  .day .wd, .day .num { transition: color .2s ease; }
+  /* Text recolours in step with the capsule: the day it leaves turns dark right away, the day it lands on turns light as it arrives */
+  .week.has-ind .day .wd, .week.has-ind .day .num, .week.has-ind .day .dot { transition: color .16s ease, background .16s ease, box-shadow .16s ease; }
+  .week.has-ind .day.sel .wd, .week.has-ind .day.sel .num, .week.has-ind .day.sel .dot { transition: color .2s ease .14s, background .2s ease .14s, box-shadow .2s ease .14s; }
+  .week.has-ind .day:active { background: transparent; }
+  .week.has-ind .day { transition: none; }
+  /* While the capsule travels: the day it lands on starts dark, the day it left starts light, then both fade to their colours */
+  .week.has-ind .day.arriving .wd, .week.has-ind .day.arriving .num, .week.has-ind .day.arriving .dot { transition: none !important; }
+  .week.has-ind .day.arriving .wd { color: var(--label2); } .week.has-ind .day.arriving.today .wd, .week.has-ind .day.arriving.today .num { color: var(--red); }
+  .week.has-ind .day.arriving:not(.today) .num { color: var(--label); }
+  .week.has-ind .day.leaving .wd, .week.has-ind .day.leaving .num { transition: none !important; color: var(--bg); }
+  .week.has-ind .day.leaving.today .wd, .week.has-ind .day.leaving.today .num { color: #fff; }
+  .week.has-ind .day:active .num { transform: scale(.9); }
+  .week.has-ind .day .num { transition: color .16s ease, transform .35s var(--bounce); display: inline-block; }
+  .week.has-ind .day.sel .num { transition: color .2s ease .14s, transform .35s var(--bounce); }
 
   /* Day: progress while a workout is on, rings per exercise, a proper empty state */
   .dprog { height: 5px; border-radius: 3px; background: var(--fill); margin: -4px 2px 16px; overflow: hidden; }
@@ -599,6 +612,6 @@
 <nav id="dock" class="glass" aria-label="Navigation"></nav>
 <div id="sheet" hidden></div>
 
-<script src="app.js?v=b3a476d974"></script>
+<script src="app.js?v=3d9f0e5660"></script>
 </body>
 </html>
