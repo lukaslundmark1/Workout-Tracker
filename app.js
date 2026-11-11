@@ -2236,22 +2236,42 @@ function syncOps(now) {
   }
   return ops;
 }
+// A save the cloud turned down is tried again later: sooner at first, then every few minutes
+function retryPush() {
+  clearTimeout(cloud.retryT);
+  cloud.retryWait = Math.min(300000, (cloud.retryWait || 7500) * 2);
+  cloud.retryT = setTimeout(() => { cloud.retryT = null; pushChanges(); }, cloud.retryWait);
+}
 async function pushChanges() {
   clearTimeout(cloud.timer); cloud.timer = null;
+  clearTimeout(cloud.retryT); cloud.retryT = null;
   if (!cloud.user || !cloud.sync || cloud.deleting) return;
-  const fb = cloud.fb, uid = cloud.user.uid;
+  const fb = cloud.fb, uid = cloud.user.uid, sync = cloud.sync;
   const ops = syncOps(Date.now());
   if (!ops.length) { if (cloud.status !== 'error') setCloudStatus(navigator.onLine ? 'synced' : 'offline'); return; }
   setCloudStatus('syncing');
   try {
     for (let i = 0; i < ops.length; i += 400) {
-      const batch = fb.writeBatch(cloud.db);
-      ops.slice(i, i + 400).forEach(o => batch.set(fb.doc(cloud.db, 'users', uid, o.col, o.id), o.body));
-      // Mark as synced right away: Firestore keeps queued writes and sends them when back online
-      ops.slice(i, i + 400).forEach(o => { if (o.h) cloud.sync.maps[o.col][o.id] = o.h; else delete cloud.sync.maps[o.col][o.id]; });
+      const part = ops.slice(i, i + 400), batch = fb.writeBatch(cloud.db);
+      part.forEach(o => batch.set(fb.doc(cloud.db, 'users', uid, o.col, o.id), o.body));
+      // Marked as synced right away (Firestore keeps queued writes and sends them when back online, and nothing is sent
+      // twice). If the cloud turns the save down, the marks are taken back, so the records are sent again later.
+      const before = part.map(o => sync.maps[o.col][o.id]);
+      part.forEach(o => { if (o.h) sync.maps[o.col][o.id] = o.h; else delete sync.maps[o.col][o.id]; });
       saveSync();
-      if (navigator.onLine) await batch.commit(); else batch.commit().catch(() => {});
+      const undo = () => {
+        if (cloud.sync !== sync) return;
+        part.forEach((o, j) => {
+          const m = sync.maps[o.col];
+          if (o.h ? m[o.id] !== o.h : o.id in m) return;           // sent again since: that send counts
+          if (before[j] === undefined) delete m[o.id]; else m[o.id] = before[j];
+        });
+        saveSync(); retryPush();
+      };
+      const sent = batch.commit();
+      if (navigator.onLine) await sent.catch(e => { undo(); throw e; }); else sent.catch(e => { undo(); setCloudStatus('error', e.code || e.message); });
     }
+    cloud.retryWait = 0;
     setCloudStatus(navigator.onLine ? 'synced' : 'offline');
   } catch (e) {
     setCloudStatus(navigator.onLine ? 'error' : 'offline', e.code || e.message);
@@ -2330,7 +2350,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.26';
+const APP_VERSION = '0.27';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -3571,8 +3591,6 @@ function sheetExForm(el) {
      <div class="chips wrap">${MUSCLES.map(([k, n]) => `<button class="chip ${s.muscle === k ? 'on' : ''}" data-fm="${k}">${n}</button>`).join('')}</div>
      <div class="section">Equipment</div>
      <div class="chips wrap">${EQUIP.map(([k, n]) => `<button class="chip ${s.equip === k ? 'on' : ''}" data-fe="${k}">${n}</button>`).join('')}</div>
-     <div class="section">Tracked by</div>
-     <div class="group"><div class="wheels">${wheelHTML('wA', TRACK_A)}<span class="x">×</span>${wheelHTML('wB', TRACK_B)}</div></div>
      <div class="section">Instructions <span class="opt">· optional</span></div>
      <div class="group"><textarea class="field-input" id="fInstr" rows="4" placeholder="Setup, cues, things to remember…"></textarea></div>
      <div class="section">Video <span class="opt">· optional</span></div>
@@ -3599,8 +3617,6 @@ function sheetExForm(el) {
   if ($('fShare')) $('fShare').onchange = e => { s.share = e.target.checked; };
   fInstr.oninput = () => s.instructions = fInstr.value;
   fVideo.oninput = () => s.video = fVideo.value;
-  initWheel('wA', ex ? Math.max(0, TRACK_A.findIndex(o => o.v === ex.track[0])) : 0);
-  initWheel('wB', ex ? Math.max(0, TRACK_B.findIndex(o => o.v === ex.track[1])) : 0);
   if (!ex && !s.name) setTimeout(() => fName.focus(), 50);
 
   $('sCancel').onclick = () => closeSheet();
@@ -3611,7 +3627,7 @@ function sheetExForm(el) {
     if (data.exercises.some(e => e.name.toLowerCase() === name.toLowerCase() && e.id !== s.exId)) { err.textContent = 'An exercise with that name already exists.'; return; }
     const video = s.video.trim();
     if (video && !ytId(video)) { err.textContent = "That doesn't look like a YouTube link."; return; }
-    const track = [TRACK_A[wheelIndex('wA')].v, TRACK_B[wheelIndex('wB')].v];
+    const track = ex ? cleanTrack(ex.track) : ['weight', 'reps'];   // weight × reps is the only kind for now
     const sharing = cloud.user && !fromDb && s.share && !(dupe && !s.sharedOwn);
     if (sharing && !s.muscle) { err.textContent = 'Pick a muscle group so others can find it in the database.'; return; }
     let id = s.exId;
@@ -3706,21 +3722,53 @@ if (/^#add-/i.test(location.hash)) {
   try { history.replaceState(null, '', location.pathname); } catch (e) {}
 }
 // A workout left running on an earlier day (forgot to press Finish) is closed at its last logged set,
-// so it doesn't stay "In progress" forever.
+// so it doesn't stay "In progress" forever. One that's still active (a set or a start in the last 3 hours, e.g. training
+// past midnight) is left running.
+const ACTIVE_MS = 3 * 3600e3;
+const lastActivity = k => { const s = dayOf(k).session; let t = s ? s.start : 0; for (const x of setsOn(k)) if (x.ts > t) t = x.ts; return t; };
+const stillActive = k => isRunning(k) && Date.now() - lastActivity(k) < ACTIVE_MS;
 function closeStaleSessions() {
   const tk = todayKey(); let changed = false;
   for (const k in data.days) {
     const s = data.days[k].session;
-    if (!s || s.end || k >= tk) continue;
+    if (!s || s.end || k >= tk || stillActive(k)) continue;
     const ts = setsOn(k).map(x => x.ts);
     if (ts.length) s.end = Math.max(s.start + 60000, ...ts); else delete data.days[k].session;
     changed = true;
   }
   if (changed) save();
+  return changed;
 }
 closeStaleSessions();
+// The app is often resumed rather than reopened (iPhone keeps it in memory), so it can wake up on a new day.
+// Then "today" moves on: the day you were looking at follows to the new today. If you're still in the middle of
+// last night's workout, you stay on it until it's finished (or has been idle for 3 hours).
+// Checked when the app comes back to the foreground, and every minute while it's open.
+let lastDay = todayKey(), heldDay = null;
+function checkNewDay() {
+  if (document.visibilityState === 'hidden') return;
+  const tk = todayKey();
+  let redraw = false;
+  if (tk !== lastDay) {
+    if (state.selected === lastDay) heldDay = lastDay;
+    lastDay = tk; redraw = true;
+    schedCache = null; sigMemo = null; pastWalk = null;
+  } else if (!heldDay) return;
+  if (closeStaleSessions()) redraw = true;
+  if (rest && rest.date !== tk && !stillActive(rest.date)) stopRest();
+  if (heldDay && !stillActive(heldDay)) {
+    if (state.selected === heldDay) {
+      state.selected = tk; state.weekStart = startOfWeek(new Date()); redraw = true;
+      // Screens that show the selected day's exercises go back to the day (a workout summary stays open)
+      if (['log', 'picker'].includes(state.views.today) && !state.sheet) { padClose(); state.views.today = 'day'; }
+    }
+    heldDay = null;
+  }
+  if (redraw) bgRender();
+}
+setInterval(checkNewDay, 60000);
 linkExistingToLib();
-if (rest && rest.start && rest.date === todayKey() && !isFinished(rest.date)) renderRest(); else if (rest) stopRest();
+if (rest && rest.start && (rest.date === todayKey() || stillActive(rest.date)) && !isFinished(rest.date)) renderRest(); else if (rest) stopRest();
 applyTheme();
 render();
 // Sign-in and sync load just after the first screen is on the glass, at a moment your finger isn't moving
@@ -3732,7 +3780,7 @@ requestAnimationFrame(() => {
 });
 // When the app is put away: anything not yet written or sent goes now (iOS may close it without warning after this)
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'hidden') return;
+  if (document.visibilityState === 'visible') { checkNewDay(); if (cloud.retryT) pushChanges(); return; }
   if (cloud.timer) { clearTimeout(cloud.timer); cloud.timer = null; pushChanges(); }
   saveSyncNow();
 });

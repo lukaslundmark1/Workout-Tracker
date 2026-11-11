@@ -13,6 +13,7 @@ cp dev/mock-firebase.js /tmp/mock/firebase-<hash>.js   # same name app.js import
 ```
 The mock signs `lukas@x.com` (password `secret1`) in as uid `u1`. In the page you can call
 `__put(path, data)`, `__del(path)` and read `__db` (a Map) to play another user (e.g. `links/u1_u2`, `gifts/g1`).
+Set `window.__failCommit = true` to make batch writes fail like a rules rejection (tests the sync retry).
 
 ## Scripts
 - `crawl.py`: opens every screen and every sheet in light and dark, reports any error. **Run before every push.**

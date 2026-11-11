@@ -52,7 +52,8 @@ export const deleteDoc = async r => window.__del(r.path);
 export const onSnapshot = (q, next) => { const qq = q.wheres ? q : { path: q.path, wheres: [] }; const l = { q: qq, next, seen: new Set(results(qq).map(d => qq.path + '/' + d.id)) };
   L.push(l); const docs = results(qq); next({ docs, docChanges: () => docs.map(d => ({ type: 'added', doc: d })), metadata: { fromCache: false } });
   return () => { const i = L.indexOf(l); if (i >= 0) L.splice(i, 1); }; };
-export const writeBatch = () => { const ops = []; return { set: (r, d) => ops.push([r, d]), commit: async () => ops.forEach(([r, d]) => put(r.path, d)) }; };
+// window.__failCommit = true makes the next batch writes fail like a rules rejection (to test that the app retries)
+export const writeBatch = () => { const ops = []; return { set: (r, d) => ops.push([r, d]), commit: async () => { if (window.__failCommit) { const e = new Error('denied'); e.code = 'permission-denied'; throw e; } ops.forEach(([r, d]) => put(r.path, d)); } }; };
 
 export const reauthenticateWithCredential = async (u, cred) => { if (cred.password !== 'secret1') { const e = new Error('wrong'); e.code = 'auth/wrong-password'; throw e; } };
 export const reauthenticateWithPopup = async () => {};

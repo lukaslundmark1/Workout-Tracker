@@ -81,6 +81,14 @@ What changed:
 - **Bug fixed while testing:** count-up numbers could flash a negative value for one frame.
 - **Ideas not done:** minifying app.js (small gain, adds a build dependency); a launch image.
 
+## Fixes from the full review (v0.27, 2026-11-11)
+Lukas asked Claude Code for a review of the whole app ("rebuild if you have to"). The verdict was **no rebuild**: the app is fast, tested and feels native, and a rebuild would risk people's data. Lukas approved fixing what the review found:
+- **New day while the app is open:** iPhone often resumes the app instead of reopening it, so it used to keep showing yesterday as "today" (and sets ticked in the morning went on yesterday). Now `checkNewDay()` runs when the app comes to the foreground and every minute: the selected day follows to the new today, stale sessions are closed and the rest stopwatch stops. **Exception:** a workout that's still active (a set or start in the last 3 hours, e.g. training past midnight) keeps you on that day until it's finished or idle; `closeStaleSessions()` also leaves such a workout running.
+- **Rejected cloud saves are retried:** records are still marked as synced when sent, but if Firestore turns the batch down the marks are taken back and the push is retried (15 s, doubling up to 5 min, also when the app comes back to the foreground). Before, a rejected save was never sent again until the record changed.
+- **"Tracked by" removed from the exercise form:** it showed Weight × Reps but couldn't be changed. New exercises are weight × reps; existing ones keep their `track`. Bring it back if more tracking types are added.
+- Review decisions: Lukas chose **exercise notes**, a **smarter finish time** and a **Today icon showing today's date** as next features. He does **not** see a white flash at launch in dark mode (no launch image needed). Not chosen for now: progress hint, muscle groups on the Exercises list.
+- Longer-term note: localStorage is limited to about 5 MB; with sync bookkeeping that's several years of heavy logging. Moving sets to IndexedDB is the fix if it ever gets close.
+
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.
 - Push: diff each record's hash against what was last synced, send in batches, debounced 600 ms.
