@@ -64,6 +64,12 @@
   /* Feels like an app, not a page: taps never wait to see if they're a double-tap zoom, and pressing on controls
      doesn't start selecting text or pop up the iOS callout */
   html { touch-action: manipulation; }
+  /* iPhone haptics: an invisible label over a control, wired to a hidden system switch (see haptic() in app.js).
+     The switch is never under the finger (that would stop scrolling that starts on the control). */
+  label.hx { position: absolute; inset: 0; border-radius: inherit; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+             -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  label.hx input { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; visibility: hidden; }
+  :disabled > label.hx { display: none; }   /* a greyed-out button doesn't tick */
   button, .cell, .chip, .seg, #dock, #numpad, .week, .cal, .pdots, .stepper, .setrow .sn { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   html, body { margin: 0; background: var(--bg); color: var(--label); }
   body {
@@ -694,6 +700,6 @@
 <nav id="dock" class="glass" aria-label="Navigation"></nav>
 <div id="sheet" hidden></div>
 
-<script src="app.js?v=b27948190a"></script>
+<script src="app.js?v=ccabd2e480"></script>
 </body>
 </html>

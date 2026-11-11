@@ -450,8 +450,14 @@ function animateSegs(root = app) {
    'impact'  a firmer tap for an action landing (ticking a set, a page turning, a dragged row moving, pulling past the close point)
    'success' two taps (workout finished, personal record, sent)      'warn' two slower taps (about to delete something)
    'error'   three quick taps (a set can't be ticked without numbers)
-   Android vibrates in matching patterns. On iPhone (iOS 18+) web apps can't vibrate, but toggling a hidden system switch gives
-   the system's own tick, so patterns are made of ticks. */
+   Android vibrates in matching patterns.
+   iPhone web apps can't vibrate. What they can do: a system switch (<input type=checkbox switch>, iOS 18+) plays the system
+   haptic when it's toggled, and since iOS 26.5 only when YOUR tap toggles it (toggling it from code no longer ticks).
+   So buttons that should tick get an invisible label laid over them, wired to a hidden switch (see hapticTargets below):
+   your tap lands on the label, the label flips the switch, iOS ticks, and the tap carries on to the button as usual.
+   That gives one tick per tap; haptic() itself still ticks from code on older iPhones and covers non-tap moments there. */
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let hxTapAt = 0;   // when a tap last landed on one of those labels (that tap already ticked)
 const haptic = (() => {
   let lbl = null, last = 0;
   const VIB = { select: 6, impact: 14, success: [12, 70, 18], warn: [22, 110, 22], error: [14, 50, 14, 50, 14] };
@@ -467,13 +473,47 @@ const haptic = (() => {
       if (now - last < 40) return;            // two at once would feel like one mushy buzz
       last = now;
       if (navigator.vibrate) { navigator.vibrate(VIB[kind] || VIB.select); return; }
+      if (now - hxTapAt < 400) return;        // this tap already ticked through its label
       (TICKS[kind] || TICKS.select).forEach(t => t ? setTimeout(tick, t) : tick());
     } catch (e) {}
   };
 })();
 // Choices made anywhere get their tick without each screen having to ask: segmented controls, filter chips, switches
-document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.seg button:not(.on), .np-seg button:not(.on), .chip, .pdot:not(.on), .week .day:not(.sel)')) haptic(); }, true);
-document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('switch')) haptic(); }, true);
+document.addEventListener('click', e => {
+  if (!e.target.closest) return;
+  if (e.target.closest('.seg button:not(.on), .np-seg button:not(.on), .chip, .pdot:not(.on), .week .day:not(.sel)')) haptic();
+  const hx = e.target.closest('label.hx');
+  if (hx) {
+    hxTapAt = performance.now();
+    // The label flips its switch only after this tap has been handled, and most taps redraw the screen, which would take the
+    // label (and the tick) with it. So it steps out to the page for that moment, and goes once it has done its job.
+    // (The tap still reaches the button: where it goes was settled when it landed.)
+    document.body.appendChild(hx); hx.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;pointer-events:none';
+    setTimeout(() => hx.remove(), 0);
+  }
+}, true);
+// The app's on/off switches are real system switches, so on iPhone they tick by themselves when you flip them
+document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('switch') && !IS_IOS) haptic(); }, true);
+// The controls that tick when tapped (on iPhone each gets the invisible label)
+const HX_SEL = ['#dock button', '.seg button', '.np-seg button', '.chip', '.week .day', '.pdot', '.check', '#plus', '#minus', '.mini-stepper button',
+  '.npk', '.np-step', '.np-next', '.trash', '#timer', '.pair button', '.mv-opt', '.pick-row', '.cell.destructive', '.primary', '.btn-tinted',
+  '.circle.prominent', '[data-rm]', '[data-rmday]', '.capsule.tint-fill', '#rSkip', '.wheel-opt'].join(', ');
+function hapticTargets() {
+  for (const el of document.querySelectorAll(HX_SEL)) {
+    if (el.lastElementChild && el.lastElementChild.classList.contains('hx')) continue;
+    if (el.closest('.ghost, .peek, .sheet-ghost')) continue;
+    if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+    const l = document.createElement('label'); l.className = 'hx'; l.setAttribute('aria-hidden', 'true');
+    const sw = document.createElement('input'); sw.type = 'checkbox'; sw.setAttribute('switch', ''); sw.tabIndex = -1;
+    sw.addEventListener('click', e => e.stopPropagation());   // the label passes its click to the switch: that copy goes no further
+    l.appendChild(sw); el.appendChild(l);
+  }
+}
+if (IS_IOS) {
+  // Whatever gets drawn (screens, sheets, the number pad, the tab bar), its controls get their labels before you can tap them
+  let q = 0;
+  new MutationObserver(() => { if (!q) q = requestAnimationFrame(() => { q = 0; hapticTargets(); }); }).observe(document.body, { childList: true, subtree: true });
+}
 let dockPos = null;
 function renderDock() {
   // Today stays in the middle
@@ -968,7 +1008,8 @@ function padEl() {
     el = document.createElement('div'); el.id = 'numpad'; el.className = 'glass'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Number pad');
     document.body.appendChild(el);
     el.addEventListener('pointerdown', e => e.preventDefault());       // keeps taps on the pad from stealing anything
-    el.addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (b) padKey(b.dataset.k); });
+    // (the path, not e.target: on iPhone the tap lands on a haptic label that steps out of the key while it's handled)
+    el.addEventListener('click', e => { const b = e.composedPath().find(n => n.dataset && n.dataset.k); if (b) padKey(b.dataset.k); });
   }
   return el;
 }
@@ -1343,7 +1384,7 @@ function sheetDuration(el) {
     `${!editing ? `
       <div class="finish-summary">${plural(loggedToday.length, 'set')} logged${unticked.length ? ` · ${plural(unticked.length, 'set')} not ticked` : ''}</div>
       ${okUnticked.length ? `
-        <div class="group"><label class="set-row"><span class="lbl">Log the ${plural(okUnticked.length, 'unticked set')} as shown</span><input type="checkbox" class="switch" id="logRest" ${st.logRest ? 'checked' : ''}></label></div>
+        <div class="group"><label class="set-row"><span class="lbl">Log the ${plural(okUnticked.length, 'unticked set')} as shown</span><input type="checkbox" switch class="switch" id="logRest" ${st.logRest ? 'checked' : ''}></label></div>
         <div class="footnote">Uses the weight and reps shown in each row.${unticked.length > okUnticked.length ? ` ${plural(unticked.length - okUnticked.length, 'set')} without numbers will be skipped.` : ''}</div>` : ''}
       ${nothing ? `<div class="footnote" style="color:var(--red)">No sets are logged, so this workout will show as empty. ${okUnticked.length ? 'Tick the sets you did, or log them above.' : 'Tick the sets you did first.'}</div>` : ''}
       <div class="section">Duration</div>` : ''}
@@ -2416,7 +2457,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.29';
+const APP_VERSION = '0.29.1';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2738,7 +2779,7 @@ function renderFriend() {
     ${giftHistoryHTML(l)}
     <div class="section">Your sharing</div>
     <div class="group"><label class="set-row"><span class="lbl">Share my training with ${esc(name)}</span>
-      <input type="checkbox" class="switch" id="shareSw" ${iShare ? 'checked' : ''}></label></div>
+      <input type="checkbox" switch class="switch" id="shareSw" ${iShare ? 'checked' : ''}></label></div>
     <div class="footnote">${esc(name)} can see your workouts, sets and progress, but can't change anything.</div>
     <div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'unfriend' ? 'confirm' : ''}" id="unfriend">${state.pending === 'unfriend' ? 'Tap again to remove' : 'Remove friend'}</button></div>`;
   $('back').onclick = () => go('friends');
@@ -3124,7 +3165,7 @@ function sheetSignOut(el) {
   const s = state.sheet;
   if (s.remove === undefined) s.remove = navigator.onLine !== false;
   el.innerHTML = sheetOpen('Sign out', `${closeBtn('sCancel')}<b>Sign out</b><span></span>`, `
-    <div class="group"><label class="set-row"><span class="lbl">Remove my training from this phone</span><input type="checkbox" class="switch" id="soRemove" ${s.remove ? 'checked' : ''}></label></div>
+    <div class="group"><label class="set-row"><span class="lbl">Remove my training from this phone</span><input type="checkbox" switch class="switch" id="soRemove" ${s.remove ? 'checked' : ''}></label></div>
     <div class="footnote">${navigator.onLine === false ? "You're offline, so your latest changes may not be backed up yet. Keep them on this phone until you're back online. "
       : ''}Your training stays safe in your account either way. Removing it is a good idea on a phone other people use.</div>
     <button class="primary destructive-fill" id="soGo" ${s.busy ? 'disabled' : ''}>${s.busy ? 'Signing out…' : 'Sign out'}</button>`);
@@ -3455,7 +3496,7 @@ function sheetAddFriend(el) {
     <div class="group"><input class="field-input code-input" id="fCode" placeholder="ABC-123" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${esc(fmtCode(cleanCode(s.code)))}"></div>
     ${s.found ? `
       <div class="group" style="margin-top:14px"><div class="profile"><span class="avatar">${esc(initialOf(s.found.name))}</span><div><div style="font-weight:600;font-size:18px">${esc(s.found.name)}</div><div class="sub" style="color:var(--label2);font-size:14px">${esc(fmtCode(cleanCode(s.code)))}</div></div></div>
-        <label class="set-row"><span class="lbl">Share my training with them</span><input type="checkbox" class="switch" id="fShare" ${s.share ? 'checked' : ''}></label></div>
+        <label class="set-row"><span class="lbl">Share my training with them</span><input type="checkbox" switch class="switch" id="fShare" ${s.share ? 'checked' : ''}></label></div>
       <div class="footnote">You can change this any time on their page.</div>` : ''}
     <div class="err" id="fErr">${esc(s.err || '')}</div>
     <button class="primary" id="fGo">${s.found ? 'Send friend request' : 'Find'}</button>`);
@@ -3493,7 +3534,7 @@ function sheetAcceptFriend(el) {
   const name = nameOf(l);
   el.innerHTML = sheetOpen('Accept', `${closeBtn('sCancel')}<b>Friend request</b><span></span>`, `
     <div class="group"><div class="profile"><span class="avatar">${esc(initialOf(name))}</span><div style="font-weight:600;font-size:18px">${esc(name)}</div></div>
-      <label class="set-row"><span class="lbl">Share my training with ${esc(name)}</span><input type="checkbox" class="switch" id="aShare" ${s.share ? 'checked' : ''}></label></div>
+      <label class="set-row"><span class="lbl">Share my training with ${esc(name)}</span><input type="checkbox" switch class="switch" id="aShare" ${s.share ? 'checked' : ''}></label></div>
     <div class="footnote">${l.share && l.share[l.from] ? `${esc(name)} is sharing their training with you.` : `${esc(name)} isn't sharing their training yet.`}</div>
     <div class="err" id="aErr">${esc(s.err || '')}</div>
     <button class="primary" id="aOk">Accept</button>`);
@@ -3683,7 +3724,7 @@ function sheetExForm(el) {
      <div class="section">Exercise database</div>
      ${fromDb ? `<div class="group"><div class="empty">From the exercise database. Your notes, video and changes stay private to you.</div></div>`
       : cloud.user ? `<div class="group"><label class="set-row"><span class="lbl">${s.sharedOwn ? 'Shared in the database' : 'Add to the database'}</span>
-          <input type="checkbox" class="switch" id="fShare" ${s.share ? 'checked' : ''} ${dupe && !s.sharedOwn ? 'disabled' : ''}></label></div>
+          <input type="checkbox" switch class="switch" id="fShare" ${s.share ? 'checked' : ''} ${dupe && !s.sharedOwn ? 'disabled' : ''}></label></div>
         <div class="footnote" id="fShareNote">${dupe && !s.sharedOwn ? `“${esc(dupe.name)}” is already in the database. Pick it from there instead, or keep this one private.`
           : 'Everyone using the app can find and add it (only the name, muscle group and equipment are shared). Leave it off for your own variations, like “Bench press, 2 s pause”.'}</div>`
       : `<div class="group"><div class="empty">Sign in to share exercises with the database. This one stays private.</div></div>`}
