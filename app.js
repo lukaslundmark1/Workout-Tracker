@@ -1,8 +1,27 @@
-/* ================= Storage ================= */
-const KEY = 'tt.v1';
+/* ================= Storage =================
+   tt.v1 holds everything except the logged sets; those are kept per month (tt.v1s.YYYY-MM) and listed in setMonths,
+   so saving after ticking a set rewrites this month only, not years of history.
+   Older saves (all sets inside tt.v1) still load; the next save splits them up. */
+const KEY = 'tt.v1', SKEY = 'tt.v1s.';
+const savedMonths = new Map();   // month → what was last written for it (to skip months that didn't change)
+const monthSig = g => { const v = new Array(g.length * 3); g.forEach((x, i) => { v[i * 3] = x.weight; v[i * 3 + 1] = x.reps; v[i * 3 + 2] = x.slot; }); return { refs: g, v }; };
+const monthSame = (m, g) => {
+  const o = savedMonths.get(m);
+  if (!o || o.refs.length !== g.length) return false;
+  for (let i = 0; i < g.length; i++) { const x = g[i]; if (o.refs[i] !== x || o.v[i * 3] !== x.weight || o.v[i * 3 + 1] !== x.reps || o.v[i * 3 + 2] !== x.slot) return false; }
+  return true;
+};
 function load() {
   let d = null;
-  try { d = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+  try {
+    d = JSON.parse(localStorage.getItem(KEY));
+    if (d && Array.isArray(d.setMonths)) {
+      const sets = [];
+      for (const m of d.setMonths) { const g = JSON.parse(localStorage.getItem(SKEY + m)) || []; savedMonths.set(m, monthSig(g)); for (const x of g) sets.push(x); }
+      d.sets = sets;
+    }
+  } catch (e) { d = null; savedMonths.clear(); }
+  if (d) delete d.setMonths;
   if (!d || !d.exercises) d = { exercises: [], days: {}, sets: [] };
   return migrate(d);
 }
@@ -36,9 +55,17 @@ function migrate(d) {
 let data = load();
 let saveError = '';
 function saveLocal() {
-  schedCache = null;
-  try { localStorage.setItem(KEY, JSON.stringify(data)); saveError = ''; }
-  catch (e) { saveError = "Couldn't save on this device."; }
+  schedCache = null; sigMemo = null;
+  try {
+    const groups = new Map();
+    for (const x of data.sets) { const m = String(x.date).slice(0, 7); let g = groups.get(m); if (!g) groups.set(m, g = []); g.push(x); }
+    // Order matters if something fails part-way: the months first, then the list that points to them, then old months go
+    for (const [m, g] of groups) if (!monthSame(m, g)) { localStorage.setItem(SKEY + m, JSON.stringify(g)); savedMonths.set(m, monthSig(g)); }
+    const rest = Object.assign({}, data, { sets: [], setMonths: [...groups.keys()].sort() });
+    localStorage.setItem(KEY, JSON.stringify(rest));
+    for (const m of [...savedMonths.keys()]) if (!groups.has(m)) { localStorage.removeItem(SKEY + m); savedMonths.delete(m); }
+    saveError = '';
+  } catch (e) { savedMonths.clear(); saveError = "Couldn't save on this device."; }
 }
 function save() { saveLocal(); if (typeof scheduleSync === 'function') scheduleSync(); }
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
@@ -46,17 +73,23 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString
 
 /* ================= Dates ================= */
 const pad = n => String(n).padStart(2, '0');
-const dk = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const dk = d => { const m = d.getMonth() + 1, n = d.getDate(); return d.getFullYear() + (m < 10 ? '-0' : '-') + m + (n < 10 ? '-0' : '-') + n; };
 const parse = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const startOfWeek = d => addDays(d, -((d.getDay() - data.settings.weekStart + 7) % 7)); // Monday or Sunday, per Settings
 const todayKey = () => dk(new Date());
 const wd = () => data.settings.weekStart === 0 ? ['S', 'M', 'T', 'W', 'T', 'F', 'S'] : ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-const fmtLong = k => parse(k).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
-const fmtShort = k => parse(k).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-const fmtTiny = k => parse(k).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-const fmtDayYear = k => parse(k).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).replace(',', '');
-const monthName = d => d.toLocaleDateString('en-GB', { month: 'long' });
+// Date text: formatters are made once and each day's text is remembered (formatting dates is slow, and lists repeat them)
+const dateFmt = (opts, post = s => s) => {
+  const f = new Intl.DateTimeFormat('en-GB', opts), memo = new Map();
+  return k => { let s = memo.get(k); if (s === undefined) { s = post(f.format(parse(k))); if (memo.size > 3000) memo.clear(); memo.set(k, s); } return s; };
+};
+const fmtLong = dateFmt({ weekday: 'long', day: 'numeric', month: 'long' });
+const fmtShort = dateFmt({ weekday: 'short', day: 'numeric', month: 'short' });
+const fmtTiny = dateFmt({ day: 'numeric', month: 'short' });
+const fmtDayYear = dateFmt({ weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }, s => s.replace(',', ''));
+const MONTHS = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('en-GB', { month: 'long' }));
+const monthName = d => MONTHS[d.getMonth()];
 
 /* ================= Helpers ================= */
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -64,8 +97,60 @@ const fmtW = w => String(Math.round(w * 100) / 100);
 const exById = id => data.exercises.find(e => e.id === id);
 const woById = id => data.workouts.find(w => w.id === id);
 const dayOf = k => data.days[k] || virtualDay(k) || { items: [], workouts: [] };
-const setsFor = (exId, k) => data.sets.filter(s => s.exId === exId && s.date === k).sort((a, b) => a.slot - b.slot || a.ts - b.ts);
-const loggedDays = () => new Set(data.sets.map(s => s.date));
+/* Index of logged sets: by exercise, by day and by exercise+day, so screens don't scan every set ever logged.
+   Works for any list of sets (yours, or a friend's cached copy). Sets inside are the real objects, sorted by slot.
+   Sets are only ever added with push, removed by making a new list, or have their weight/reps edited in place
+   (the index holds the same objects, so those edits show up as they are). So: same list + same length = still valid,
+   same list + longer = the new sets at the end are slotted in. */
+const IX = new WeakMap();
+const bySlot = (a, b) => a.slot - b.slot || a.ts - b.ts;
+const byDateSlot = (p, q) => (p.date < q.date ? -1 : p.date > q.date ? 1 : bySlot(p, q));
+function insertSorted(a, v, cmp) { let i = a.length; while (i > 0 && cmp(a[i - 1], v) > 0) i--; a.splice(i, 0, v); }
+function ix(src = data.sets) {
+  let x = IX.get(src);
+  if (x && x.n === src.length) return x;
+  if (x && x.n < src.length && src.length - x.n < 50) {
+    for (let i = x.n; i < src.length; i++) {
+      const s = src[i], ek = s.exId + '|' + s.date;
+      let a = x.byExDate.get(ek); if (!a) x.byExDate.set(ek, a = []); insertSorted(a, s, bySlot);
+      a = x.byEx.get(s.exId); if (!a) x.byEx.set(s.exId, a = []); insertSorted(a, s, byDateSlot);
+      a = x.byDate.get(s.date); if (!a) x.byDate.set(s.date, a = []); a.push(s);
+      a = x.exDates.get(s.exId); if (!a) x.exDates.set(s.exId, a = []); if (!a.includes(s.date)) insertSorted(a, s.date, (p, q) => (p < q ? -1 : p > q ? 1 : 0));
+    }
+    x.n = src.length;
+    return x;
+  }
+  x = { n: src.length, byExDate: new Map(), byEx: new Map(), byDate: new Map(), exDates: new Map() };
+  for (const s of src) {
+    const ek = s.exId + '|' + s.date;
+    let a = x.byExDate.get(ek); if (!a) x.byExDate.set(ek, a = []); a.push(s);
+    a = x.byEx.get(s.exId); if (!a) x.byEx.set(s.exId, a = []); a.push(s);
+    a = x.byDate.get(s.date); if (!a) x.byDate.set(s.date, a = []); a.push(s);
+  }
+  for (const a of x.byExDate.values()) a.sort(bySlot);
+  for (const [id, a] of x.byEx) {
+    a.sort(byDateSlot);
+    const ds = []; for (const s of a) if (ds[ds.length - 1] !== s.date) ds.push(s.date);
+    x.exDates.set(id, ds);   // the days that exercise was done, oldest first
+  }
+  IX.set(src, x);
+  return x;
+}
+const NONE = Object.freeze([]);
+const setsOf = (exId, k, src) => ix(src).byExDate.get(exId + '|' + k) || NONE;   // sorted by slot; don't modify
+const setsFor = (exId, k) => setsOf(exId, k).slice();
+const setsOn = (k, src) => ix(src).byDate.get(k) || NONE;
+const hasSets = (k, src) => ix(src).byDate.has(k);
+const exSets = (exId, src) => ix(src).byEx.get(exId) || NONE;        // oldest day first
+const exDates = (exId, src) => ix(src).exDates.get(exId) || NONE;
+// The last day before k that exercise was done
+function prevDateOf(exId, k, src) {
+  const ds = exDates(exId, src);
+  let lo = 0, hi = ds.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (ds[m] < k) lo = m + 1; else hi = m; }
+  return lo ? ds[lo - 1] : undefined;
+}
+const loggedDays = () => ix().byDate;   // has(k) works like the Set it used to be
 // Filled dot = trained that day; ring = a planned workout day still to come
 const dotCls = (k, logged) => logged.has(k) ? 'on' : (k >= todayKey() && dayOf(k).items.length) ? 'plan' : '';
 const byName = (a, b) => a.name.localeCompare(b.name);
@@ -142,7 +227,7 @@ const app = $('app');
 const TAB_ROOT = { today: 'day', workouts: 'wList', exercises: 'eList', friends: 'friends', settings: 'settings' };
 
 function render() {
-  schedCache = null;
+  bgPending = false;
   if (typeof purgeStalePlanDays === 'function') purgeStalePlanDays();
   const VIEWS = { day: renderDay, log: renderLog, summary: renderSummary, history: renderHistory, picker: renderPicker, calendar: renderCalendar,
                   wList: renderWorkoutList, wEdit: renderWorkoutEdit, pView: renderPlanView, pEdit: renderPlanEdit, eList: renderExerciseList, eDetail: renderExerciseDetail,
@@ -157,19 +242,51 @@ function render() {
   animateSegs();
   polish();
   padAfterRender();
+  document.body.classList.toggle('has-pdots', !!app.querySelector('.pdots'));
+  pullSync();   // (a class instead of a :has() rule, which re-checks on every change)
   state.justTicked = null;
+}
+/* Redraws that come from the background (sync, sign-in, friends, the shared database) wait until nothing is moving:
+   no finger on the screen, no scroll still gliding, no screen sliding in, number pad closed. Several in a row become one.
+   (Redrawing mid-swipe or mid-scroll makes things jump; this is what keeps it feeling solid.) */
+let touching = 0, lastScroll = 0, bgPending = false, bgTimer = 0;
+document.addEventListener('touchstart', e => { touching = e.touches.length; }, { passive: true, capture: true });
+['touchend', 'touchcancel'].forEach(t => document.addEventListener(t, e => { touching = e.touches.length; if (!touching && bgPending) bgLater(120); }, { passive: true, capture: true }));
+window.addEventListener('scroll', () => { lastScroll = performance.now(); }, { passive: true, capture: true });
+const bgLater = ms => { clearTimeout(bgTimer); bgTimer = setTimeout(flushBg, ms); };
+function bgRender() { bgPending = true; bgLater(0); }
+function flushBg() {
+  if (!bgPending) return;
+  if (touching || np || performance.now() - lastScroll < 150 || document.querySelector('.ghost, .sheet-ghost')) return bgLater(200);
+  bgPending = false;
+  render();
 }
 const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, summary: 1, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pWorkout: 3, fEx: 4, lib: 2 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
+// Only what's on the glass is copied: parts of the screen below the bottom edge are left out (long lists), and the copy
+// is a window the size of the screen, scrolled to where you were. Much less to copy and to move while it animates.
 function ghost(onTop) {
+  const r = app.getBoundingClientRect(), vh = window.innerHeight;
   const g = app.cloneNode(true);
+  const prune = (orig, copy, depth) => {
+    const oc = orig.children, cc = copy.children;
+    if (oc.length !== cc.length) return;
+    for (let i = oc.length - 1; i >= 0; i--) {
+      const b = oc[i].getBoundingClientRect();
+      if (b.top > vh + 40) cc[i].remove();
+      else if (depth < 6 && b.bottom > vh + 40 && oc[i].children.length) prune(oc[i], cc[i], depth + 1);
+    }
+  };
+  prune(app, g, 0);
   g.removeAttribute('id');
   g.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
   g.className = 'ghost' + (onTop ? ' top' : '');
-  g.style.top = app.getBoundingClientRect().top + 'px';
+  const top = Math.max(0, r.top);
+  g.style.top = top + 'px'; g.style.height = (vh - top) + 'px'; g.style.paddingBottom = vh + 'px';
   g.setAttribute('aria-hidden', 'true');
   document.body.appendChild(g);
+  if (r.top < 0) g.scrollTop = -r.top;
   return g;
 }
 function go(view, extra = {}) {
@@ -219,7 +336,7 @@ function countUp(node) {
   const t0 = performance.now(), dur = 650;
   const step = now => {
     if (!node.isConnected) return;
-    const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    const p = Math.max(0, Math.min(1, (now - t0) / dur)), e = 1 - Math.pow(1 - p, 3);   // a frame can be stamped just before t0
     node.textContent = p < 1 ? fmt(end * e) : txt;
     if (p < 1) requestAnimationFrame(step);
   };
@@ -340,6 +457,10 @@ function renderDock() {
   const tabs = [['friends', 'Friends', ICON_FRIENDS], ['workouts', 'Workouts', ICON_WORKOUTS], ['today', 'Today', ICON_TODAY], ['exercises', 'Exercises', ICON_EXERCISES], ['settings', 'Settings', ICON_SETTINGS]];
   const dock = $('dock');
   const reqs = (typeof friends !== 'undefined' && cloud.user) ? friends.links.filter(l => l.status === 'pending' && l.from !== cloud.user.uid).length + pendingGifts().length : 0;
+  // Only redrawn when the selected tab or the badge changes (not on every screen update)
+  const sig = state.tab + '|' + reqs;
+  if (dock.dataset.sig === sig && dock.firstChild) return;
+  dock.dataset.sig = sig;
   dock.innerHTML = tabs.map(([t, label, icon]) => `<button data-tab="${t}" class="${state.tab === t ? 'on' : ''}" aria-label="${label}${t === 'friends' && reqs ? `, ${reqs} new` : ''}">${icon}${t === 'friends' && reqs ? `<span class="tab-badge">${reqs}</span>` : ''}<span>${label}</span></button>`).join('');
   // The selection pill slides from the previous tab to the new one
   const on = dock.querySelector('button.on');
@@ -471,7 +592,7 @@ function weekLabel(ws, short) {
 function clearEmptyDay(k, byUser) {
   const d = data.days[k]; if (!d) return;
   d.workouts = [];
-  if (!data.sets.some(s => s.date === k)) delete d.session;
+  if (!hasSets(k)) delete d.session;
   if (d.session) return;
   if (byUser && d.plan && !d.pinned && k >= todayKey() && activePlan()) data.days[k] = { items: [], workouts: [], rest: true, absorb: 'next' };
   else delete data.days[k];
@@ -480,10 +601,10 @@ function clearEmptyDay(k, byUser) {
 // "Do it today" from another day:
 //  • the next workout of your plan, while today is a rest day → it's brought to today (nothing is skipped)
 //  • a one-off workout you put on a day yourself → moved to today (copied if it's in the past)
-const todayIsFree = () => { const tk = todayKey(); return !data.sets.some(s => s.date === tk) && !(dayOf(tk).session) && !dayOf(tk).items.length; };
+const todayIsFree = () => { const tk = todayKey(); return !hasSets(tk) && !(dayOf(tk).session) && !dayOf(tk).items.length; };
 function canDoToday(k) {
   const tk = todayKey(), d = dayOf(k);
-  if (k === tk || !d.items.length || data.sets.some(s => s.date === k) || d.session) return false;
+  if (k === tk || !d.items.length || hasSets(k) || d.session) return false;
   const pd = planDayFor(k);
   if (pd && pd.workout && !(data.days[k] && !data.days[k].plan)) { const nx = upNext(); return k > tk && todayIsFree() && nx && nx.k === k; }
   return true;
@@ -541,7 +662,7 @@ function renderDay() {
     <div class="day-title">${fmtLong(k)}</div>
     <div class="day-sub">${day.items.length && day.workouts.length ? day.workouts.map(w => esc(w.name)).join(' + ') : day.items.length ? 'Custom workout'
       : pd && pd.extra ? 'Rest day (moved)' : pd && pd.workout ? `${esc(pd.workout.name)} (no exercises yet)` : pd ? 'Rest day' : k < tk ? 'Nothing logged' : 'No workout planned'}${day.items.length && k < tk && !logged.has(k) && !day.session ? ' · not trained' : ''}${pd ? ` · ${esc(pd.plan.name)}${pd.index >= 0 ? `, day ${pd.index + 1} of ${pd.plan.days.length}` : ''}` : ''}${day.session ? ` · ${day.session.end ? 'Finished in ' + fmtMins(day.session.end - day.session.start) : 'In progress'}` : ''}</div>
-    ${isFinished(k) && data.sets.some(x => x.date === k) ? `<button class="capsule glass move-btn" id="sumBtn">${svg('<path d="M5 19V11M12 19V5M19 19v-6"/>', 16, 2.4)} Workout summary</button>` : ''}
+    ${isFinished(k) && hasSets(k) ? `<button class="capsule glass move-btn" id="sumBtn">${svg('<path d="M5 19V11M12 19V5M19 19v-6"/>', 16, 2.4)} Workout summary</button>` : ''}
     ${nx ? `<button class="capsule glass move-btn" id="pullNext">${svg('<path d="M7 5l11 7-11 7z"/>', 15, 2.2)} Do ${esc(nx.workout.name)} today</button>` : ''}
     ${canDoToday(k) ? `<button class="capsule glass move-btn" id="doToday">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16, 2.4)} Do it today</button>` : ''}
     ${canRest ? `<button class="capsule glass move-btn" id="restDay">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 15, 2.2)} ${k === tk ? "Can't make it today" : 'Move back a day'}</button>` : ''}
@@ -631,9 +752,8 @@ function logModel(k, idx) {
   const n = Math.max(item.sets || 0, maxSlot + 1);
   const dkey = ex.id + '|' + k;
   const drafts = (state.drafts[dkey] = state.drafts[dkey] || {});
-  const prevDates = [...new Set(data.sets.filter(s => s.exId === ex.id && s.date < k).map(s => s.date))].sort();
-  const prevK = prevDates[prevDates.length - 1];
-  const prevSets = prevK ? setsFor(ex.id, prevK) : [];
+  const prevK = prevDateOf(ex.id, k);
+  const prevSets = prevK ? setsOf(ex.id, prevK) : [];
   return { day, item, ex, today, bySlot, n, dkey, drafts, prevK, prevSets, idx, total: day.items.length };
 }
 
@@ -880,6 +1000,10 @@ function padDraw() {
   if (inp) inp.classList.add('active'), inp.classList.toggle('fresh', np.fresh && !!inp.value);
   const last = np.field === 'r' && np.i + 1 >= padRows();
   const shown = inp && inp.value ? `${esc(inp.value)}<small>${isW ? U() : (inp.value === '1' ? 'rep' : 'reps')}</small>` : `<span class="ph">${isW ? U() : 'reps'}</span>`;
+  // Typing only changes the number shown; the keys are redrawn only when the field (or what Next does) changes
+  const sig = `${np.i}|${np.field}|${last}|${U()}`, num = el.querySelector('.np-num');
+  if (el.dataset.sig === sig && num) { num.innerHTML = shown; return; }
+  el.dataset.sig = sig;
   const key = (k, label, cls = '') => `<button class="npk ${cls}" data-k="${k}" aria-label="${label}">${label}</button>`;
   el.innerHTML = `
     <div class="np-top"><span class="np-where">Set ${np.i + 1}</span>
@@ -918,12 +1042,12 @@ document.addEventListener('keydown', e => {
 // (Your very first session of an exercise doesn't count, otherwise everything would be a PR.)
 function prevBest(exId, k, src = data.sets) {
   let b = null;
-  for (const s of src) if (s.exId === exId && s.date < k) b = Math.max(b || 0, e1rm(s));
+  for (const s of exSets(exId, src)) { if (s.date >= k) break; b = Math.max(b || 0, e1rm(s)); }   // oldest first, so stop at day k
   return b;
 }
 function prFor(exId, k, src = data.sets) {
+  const ss = setsOf(exId, k, src); if (!ss.length) return null;
   const pb = prevBest(exId, k, src); if (pb === null) return null;
-  const ss = src.filter(s => s.exId === exId && s.date === k); if (!ss.length) return null;
   const best = ss.reduce((a, b) => (e1rm(b) > e1rm(a) ? b : a));
   return e1rm(best) > pb + 1e-6 ? { set: best, prev: pb, now: e1rm(best) } : null;
 }
@@ -952,13 +1076,14 @@ function renderRest() {
   let el = $('rest');
   if (!el) { el = document.createElement('div'); el.id = 'rest'; document.body.appendChild(el); }
   clearInterval(restTick);
+  document.body.classList.toggle('rest-on', !!rest);
   if (!rest) { el.classList.remove('on'); return; }
   const ex = exById(rest.exId);
   el.innerHTML = `<div class="rest-in glass"><div class="rest-mid"><span class="lbl">Rest</span><span class="t" id="restT"></span>${ex ? `<span class="rest-ex">${esc(ex.name)}</span>` : ''}</div>
     <button id="rSkip" aria-label="Stop rest stopwatch">${ICON_X}</button></div>`;
   el.classList.add('on');
   $('rSkip').onclick = () => stopRest();
-  const tick = () => { const t = $('restT'); if (rest && t) t.textContent = fmtDur(Date.now() - rest.start); };
+  const tick = () => { const t = $('restT'); if (!rest || !t) return; const v = fmtDur(Date.now() - rest.start); if (t.textContent !== v) t.textContent = v; };
   tick();
   restTick = setInterval(tick, 500);
 }
@@ -966,7 +1091,7 @@ function renderRest() {
 /* ================= Workout summary ================= */
 function renderSummary() {
   const k = state.sumDate || state.selected;
-  const d = dayOf(k), ss = data.sets.filter(s => s.date === k);
+  const d = dayOf(k), ss = setsOn(k).slice().sort((a, b) => a.ts - b.ts);
   if (!ss.length && !(d.session && d.session.end)) return go('day');
   const order = d.items.map(i => i.exId);
   const exIds = [...new Set([...order.filter(id => ss.some(s => s.exId === id)), ...ss.map(s => s.exId)])].filter(exById);
@@ -974,12 +1099,11 @@ function renderSummary() {
   const title = d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Custom workout';
   const prs = exIds.map(id => ({ id, pr: prFor(id, k) })).filter(x => x.pr);
   const rows = exIds.map(id => {
-    const mine = ss.filter(s => s.exId === id), best = mine.reduce((a, b) => (e1rm(b) > e1rm(a) ? b : a));
-    const prevDates = [...new Set(data.sets.filter(s => s.exId === id && s.date < k).map(s => s.date))].sort();
-    const pk = prevDates[prevDates.length - 1];
+    const mine = setsOf(id, k), best = mine.reduce((a, b) => (e1rm(b) > e1rm(a) ? b : a));
+    const pk = prevDateOf(id, k);
     let delta = '<span class="delta same">First time</span>';
     if (pk) {
-      const pb = Math.max(...data.sets.filter(s => s.exId === id && s.date === pk).map(e1rm));
+      const pb = Math.max(...setsOf(id, pk).map(e1rm));
       const pct = Math.round(((e1rm(best) - pb) / pb) * 100);
       delta = pct > 0 ? `<span class="delta up">▲ ${pct}%</span>` : pct < 0 ? `<span class="delta down">▼ ${-pct}%</span>` : '<span class="delta same">Same</span>';
     }
@@ -1017,6 +1141,24 @@ function swipePager(surface, target, opts) {
   let s = null;
   const ease = 'transform .36s cubic-bezier(.32,.72,0,1)';
   const clearPeek = () => { if (s && s.peek) { s.peek.remove(); s.peek = null; } };
+  // The neighbouring pages are built ahead of time, once the screen has settled, so a swipe starts moving on its
+  // very first frame (building a page takes a few milliseconds, which would otherwise land right as your finger moves)
+  const ready = {};
+  const prep = dir => {
+    if (dir in ready) return ready[dir];
+    const html = opts.peek(dir);
+    let p = null;
+    if (html != null) {
+      p = document.createElement('div');
+      p.className = 'peek';
+      p.setAttribute('aria-hidden', 'true');
+      p.innerHTML = html;
+      p.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+    }
+    return (ready[dir] = p);
+  };
+  const later = f => { const run = () => { if (!surface.isConnected || s) return; if (touching || performance.now() - lastScroll < 200) return setTimeout(run, 250); f(); }; setTimeout(run, 300); };
+  later(() => { prep(1); later(() => prep(-1)); });   // only while nothing is moving
   surface.addEventListener('touchstart', e => {
     if (e.touches.length > 1 || e.target.closest('input, textarea, .chart, .grip')) { s = null; return; }
     const t = e.touches[0];
@@ -1039,13 +1181,8 @@ function swipePager(surface, target, opts) {
     if (dir !== s.dir) {
       s.dir = dir;
       clearPeek();
-      const html = opts.peek(dir);
-      if (html != null) {
-        const p = document.createElement('div');
-        p.className = 'peek';
-        p.setAttribute('aria-hidden', 'true');
-        p.innerHTML = html;
-        p.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+      const p = prep(dir);
+      if (p) {
         p.style.left = dir > 0 ? 'calc(100% + 16px)' : 'calc(-100% - 16px)';
         p.style.top = (opts.peekTop ? opts.peekTop() : 0) + 'px';
         target.appendChild(p);
@@ -1067,7 +1204,7 @@ function swipePager(surface, target, opts) {
       setTimeout(() => opts.commit(st.dir), 330);
     } else {
       target.style.transform = '';
-      setTimeout(() => { if (st.peek) st.peek.remove(); }, 360);
+      setTimeout(() => { if (st.peek && !(s && s.peek === st.peek)) st.peek.remove(); }, 360);
     }
   };
   surface.addEventListener('touchend', end);
@@ -1125,14 +1262,14 @@ const isFinished = k => { const s = dayOf(k).session; return !!(s && s.end); };
 const isRunning = k => { const s = dayOf(k).session; return !!(s && s.start && !s.end); };
 // Finish workout is offered for a workout that's running, or for today once something is logged.
 // (Past days you're just filling in afterwards don't get a timer or a Finish button.)
-const canFinish = k => !isFinished(k) && (isRunning(k) || (k === todayKey() && data.sets.some(x => x.date === k)));
+const canFinish = k => !isFinished(k) && (isRunning(k) || (k === todayKey() && hasSets(k)));
 const openFinish = k => openSheet({ type: 'duration', k });
 function sheetDuration(el) {
   const st = state.sheet, k = st.k;
   const day = dayOf(k);
   const s = day.session;
   const editing = s && s.end;
-  const loggedToday = data.sets.filter(x => x.date === k);
+  const loggedToday = setsOn(k).slice();
   const unticked = editing ? [] : untickedSets(k);
   const okUnticked = unticked.filter(u => u.ok);
   if (st.logRest === undefined) st.logRest = okUnticked.length > 0;
@@ -1177,7 +1314,7 @@ function sheetDuration(el) {
     state.sheet = null;
     if (editing) return render();
     stopRest();
-    if (data.sets.some(x => x.date === k)) go('summary', { sumDate: k }); else go('day');
+    if (hasSets(k)) go('summary', { sumDate: k }); else go('day');
   };
 }
 
@@ -1275,10 +1412,9 @@ const STATS = [
   { key: 'reps', label: 'Reps', unit: 'reps' },
 ];
 function seriesFor(exId, key) {
-  const byDate = {};
-  (state.statSrc || data.sets).filter(s => s.exId === exId).forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
-  return Object.keys(byDate).sort().map(k => {
-    const ss = byDate[k];
+  const src = state.statSrc || data.sets;
+  return exDates(exId, src).map(k => {
+    const ss = setsOf(exId, k, src);
     let v, note;
     if (key === 'e1rm') { const best = ss.reduce((a, s) => (e1rm(s) > e1rm(a) ? s : a)); v = toU(e1rm(best)); note = `from ${W(+best.weight)} × ${best.reps | 0}`; }
     else if (key === 'heaviest') { v = toU(Math.max(...ss.map(s => s.weight))); note = plural(ss.length, 'set'); }
@@ -1309,27 +1445,47 @@ function progressHTML(exId) {
 function wireProgress(exId) {
   app.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { state.stat = b.dataset.s; render(); });
   drawChart($('chart'), seriesFor(exId, state.stat), STATS.find(s => s.key === state.stat));
+  wireHistory();
+}
+// History cards are drawn a screenful at a time: the first ones right away, more as you scroll near the end
+// (years of sessions would otherwise mean thousands of rows to build and lay out before the screen can open)
+const HIST_CHUNK = 12;
+let hist = null, histObs = null;
+function histCardHTML(h, k) {
+  const ss = setsOf(h.exId, k, h.src);
+  const best = Math.max(...ss.map(e1rm)), prId = h.prSet[k];
+  return `<div class="hcard"><div class="hcard-head"><b>${relDay(k)}</b><span>e1RM ${fmtStat(toU(best), 'e1rm')} ${U()}</span></div>
+    ${ss.map((s, i) => `<div class="hset"><span class="n">${i + 1}</span><span class="v">${W(+s.weight)} ${U()} × ${s.reps | 0}${prId === s.id ? '<span class="pr-badge">PR</span>' : ''}</span></div>`).join('')}</div>`;
 }
 function historyHTML(exId) {
   const src = state.statSrc || data.sets;
-  const setsFor = (id, k) => src.filter(s => s.exId === id && s.date === k).sort((a, b) => a.slot - b.slot || a.ts - b.ts);
-  const mine = src.filter(s => s.exId === exId);
-  const dates = [...new Set(mine.map(s => s.date))].sort();
+  const dates = exDates(exId, src);
   // Each day's PR set (best estimated 1RM beating every earlier day), worked out oldest → newest in one pass
   const prSet = {}; let runBest = null;
   for (const k of dates) {
-    const ss = mine.filter(s => s.date === k), top = ss.reduce((a, b) => (e1rm(b) > e1rm(a) ? b : a));
+    const top = setsOf(exId, k, src).reduce((a, b) => (e1rm(b) > e1rm(a) ? b : a));
     if (runBest !== null && e1rm(top) > runBest + 1e-6) prSet[k] = top.id;
     runBest = Math.max(runBest || 0, e1rm(top));
   }
-  dates.reverse();
-  return `<div class="section">History</div>` + (dates.length ? dates.map(k => {
-    const ss = setsFor(exId, k);
-    const best = Math.max(...ss.map(e1rm));
-    const pr = prSet[k] ? { set: { id: prSet[k] } } : null;
-    return `<div class="hcard"><div class="hcard-head"><b>${relDay(k)}</b><span>e1RM ${fmtStat(toU(best), 'e1rm')} ${U()}</span></div>
-      ${ss.map((s, i) => `<div class="hset"><span class="n">${i + 1}</span><span class="v">${W(+s.weight)} ${U()} × ${s.reps | 0}${pr && pr.set.id === s.id ? '<span class="pr-badge">PR</span>' : ''}</span></div>`).join('')}</div>`;
-  }).join('') : '<div class="group"><div class="empty">No sets logged yet.</div></div>');
+  // Redrawing the same screen (e.g. another stat) keeps as many cards as were already showing, so nothing jumps
+  const key = `${state.tab}:${state.views[state.tab]}:${exId}:${src === data.sets ? 'me' : 'f'}`;
+  const shown = hist && hist.key === key ? Math.max(hist.shown, HIST_CHUNK) : HIST_CHUNK;
+  hist = { key, exId, src, prSet, dates: dates.slice().reverse(), shown };
+  if (!dates.length) return '<div class="section">History</div><div class="group"><div class="empty">No sets logged yet.</div></div>';
+  return `<div class="section">History</div><div id="hlist">${hist.dates.slice(0, shown).map(k => histCardHTML(hist, k)).join('')}</div>${shown < hist.dates.length ? '<div id="hmore" class="hmore" aria-hidden="true"></div>' : ''}`;
+}
+function wireHistory() {
+  if (histObs) { histObs.disconnect(); histObs = null; }
+  const more = $('hmore'), h = hist;
+  if (!more || !h || !('IntersectionObserver' in window)) return;
+  histObs = new IntersectionObserver(es => {
+    if (!es.some(e => e.isIntersecting) || hist !== h || !more.isConnected) return;
+    const next = h.dates.slice(h.shown, h.shown + HIST_CHUNK);
+    h.shown += next.length;
+    $('hlist').insertAdjacentHTML('beforeend', next.map(k => histCardHTML(h, k)).join(''));
+    if (h.shown >= h.dates.length) { histObs.disconnect(); more.remove(); }
+  }, { rootMargin: '0px 0px 900px 0px' });
+  histObs.observe(more);
 }
 
 function renderHistory() {
@@ -1356,10 +1512,8 @@ function niceTicks(lo, hi, n) {
 }
 function drawChart(box, pts, stat) {
   if (!pts.length) { box.style.height = 'auto'; box.style.margin = '0'; box.innerHTML = '<div style="color:var(--label2);padding:20px 0;text-align:center">Log some sets to see your progress here.</div>'; return; }
-  const css = getComputedStyle(document.documentElement);
-  const C = n => css.getPropertyValue(n).trim();
-  const tint = C('--tint'), gridC = C('--grid'), axis = C('--label2'), ring = C('--card');
-  const W = box.clientWidth, H = 210, L = 38, R = 8, T = 34, B = 22;
+  const tint = 'var(--tint)', gridC = 'var(--grid)', axis = 'var(--label2)', ring = 'var(--card)';
+  const W = box.clientWidth || Math.min(app.clientWidth, 600) - 64, H = 210, L = 38, R = 8, T = 34, B = 22;
   const vals = pts.map(p => p.v);
   let lo = Math.min(...vals), hi = Math.max(...vals);
   if (lo === hi) { const p = Math.max(1, Math.abs(lo) * 0.05); lo -= p; hi += p; }
@@ -1368,25 +1522,25 @@ function drawChart(box, pts, stat) {
   const x = t => t1 === t0 ? L + (W - L - R) / 2 : L + ((t - t0) / (t1 - t0)) * (W - L - R);
   const y = v => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
   const tickFmt = v => stat.key === 'volume' && y1 >= 10000 ? `${Math.round(v / 1000)}k` : fmtW(v);
-  const grid = ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${gridC}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="${axis}">${tickFmt(v)}</text>`).join('');
+  const grid = ticks.map(v => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" style="stroke:${gridC}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" style="fill:${axis}">${tickFmt(v)}</text>`).join('');
   const xl = pts.length > 1
-    ? `<text x="${L}" y="${H - 4}" font-size="11" fill="${axis}">${fmtTiny(pts[0].k)}</text><text x="${W - R}" y="${H - 4}" text-anchor="end" font-size="11" fill="${axis}">${fmtTiny(pts[pts.length - 1].k)}</text>`
-    : `<text x="${x(t0)}" y="${H - 4}" text-anchor="middle" font-size="11" fill="${axis}">${fmtTiny(pts[0].k)}</text>`;
+    ? `<text x="${L}" y="${H - 4}" font-size="11" style="fill:${axis}">${fmtTiny(pts[0].k)}</text><text x="${W - R}" y="${H - 4}" text-anchor="end" font-size="11" style="fill:${axis}">${fmtTiny(pts[pts.length - 1].k)}</text>`
+    : `<text x="${x(t0)}" y="${H - 4}" text-anchor="middle" font-size="11" style="fill:${axis}">${fmtTiny(pts[0].k)}</text>`;
   const d = smoothPath(pts.map(p => [x(p.t), y(p.v)]));
   const lastP = pts[pts.length - 1];
-  const dots = pts.length > 24 ? '' : pts.slice(0, -1).map(p => `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="3" fill="${tint}" stroke="${ring}" stroke-width="1.5"/>`).join('');
-  const end = `<circle class="halo" cx="${x(lastP.t)}" cy="${y(lastP.v)}" r="9" fill="${tint}" opacity=".18"/><circle cx="${x(lastP.t)}" cy="${y(lastP.v)}" r="4.5" fill="${tint}" stroke="${ring}" stroke-width="2"/>`;
+  const dots = pts.length > 24 ? '' : pts.slice(0, -1).map(p => `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="3" stroke-width="1.5" style="fill:${tint};stroke:${ring}"/>`).join('');
+  const end = `<circle class="halo" cx="${x(lastP.t)}" cy="${y(lastP.v)}" r="9" opacity=".18" style="fill:${tint}"/><circle cx="${x(lastP.t)}" cy="${y(lastP.v)}" r="4.5" stroke-width="2" style="fill:${tint};stroke:${ring}"/>`;
   const animKey = `${state.tab}:${state.views[state.tab]}:${stat.key}:${pts.length}:${W}`;
   const still = animKey === drawChart.last || reduceMotion();
   drawChart.last = animKey;
   box.innerHTML = `<svg class="${still ? 'still' : 'draw'}" width="${W}" height="${H}" role="img" aria-label="${stat.label} over time">
       ${grid}${xl}
-      <defs><linearGradient id="fillG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${tint}" stop-opacity=".26"/><stop offset=".65" stop-color="${tint}" stop-opacity=".05"/><stop offset="1" stop-color="${tint}" stop-opacity="0"/></linearGradient></defs>
+      <defs><linearGradient id="fillG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-opacity=".26" style="stop-color:${tint}"/><stop offset=".65" stop-opacity=".05" style="stop-color:${tint}"/><stop offset="1" stop-opacity="0" style="stop-color:${tint}"/></linearGradient></defs>
       ${pts.length > 1 ? `<path class="c-area" d="${d}L${x(t1).toFixed(1)},${H - B}L${x(t0).toFixed(1)},${H - B}Z" fill="url(#fillG)"/>` : ''}
-      <path class="c-line" pathLength="1" d="${d}" fill="none" stroke="${tint}" stroke-width="2.75" stroke-linejoin="round" stroke-linecap="round"/>
+      <path class="c-line" pathLength="1" d="${d}" fill="none" stroke-width="2.75" stroke-linejoin="round" stroke-linecap="round" style="stroke:${tint}"/>
       <g class="c-dots">${dots}</g><g class="c-end">${end}</g>
-      <line id="cross" y1="${T - 4}" y2="${H - B}" stroke="${axis}" stroke-opacity=".5" visibility="hidden"/>
-      <circle id="focus" r="6" fill="${tint}" stroke="${ring}" stroke-width="2" visibility="hidden"/>
+      <line id="cross" y1="${T - 4}" y2="${H - B}" stroke-opacity=".5" visibility="hidden" style="stroke:${axis}"/>
+      <circle id="focus" r="6" stroke-width="2" visibility="hidden" style="fill:${tint};stroke:${ring}"/>
       <rect id="hit" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>
     </svg><div class="tip glass" id="tip" hidden></div>`;
   const hit = box.querySelector('#hit'), cross = box.querySelector('#cross'), focus = box.querySelector('#focus'), tip = box.querySelector('#tip');
@@ -1425,7 +1579,7 @@ function renderExerciseList() {
     const list = data.exercises.filter(e => e.name.toLowerCase().includes(term)).sort(byName);
     const fromLib = term ? libAll().filter(x => normName(x.name).includes(normName(term)) && !mineFor(x)).slice(0, 5) : [];
     $('results').innerHTML = (list.length || !fromLib.length ? `<div class="group">${list.length ? list.map(e => {
-      const dates = data.sets.filter(s => s.exId === e.id).map(s => s.date).sort();
+      const dates = exDates(e.id);
       return cell({ attrs: `data-id="${e.id}"`, main: esc(e.name), sub: dates.length ? `Last logged ${fmtShort(dates[dates.length - 1])}` : 'Never logged' });
     }).join('') : `<div class="empty">${data.exercises.length ? 'None of your exercises match.' : 'No exercises yet. Tap Add exercise to pick from the database.'}</div>`}</div>` : '')
       + (fromLib.length ? `<div class="section">From the database</div><div class="group">${fromLib.map(x => libRowHTML(x, 'list')).join('')}</div>` : '');
@@ -1481,26 +1635,58 @@ function planIndexOf(d, plan) {
   const j = plan.days.findIndex(x => x.workoutId && ids.includes(x.workoutId));
   return j >= 0 ? j : null;
 }
-let schedCache = null;   // cleared whenever data changes (saveLocal) and on every render
+/* The schedule is reused until something it depends on changes. Its fingerprint covers exactly what it reads:
+   today, the active plan and its days, which workouts exist, and each stored day's rest/pinned/plan/workout/trained
+   markers. (Ticking another set on a day that's already trained changes none of that.)
+   The walk through past days is also kept: changes from today on (moving a workout, the previews of those moves,
+   today's first set) only redo today onwards. */
+let schedCache = null, sigMemo = null, pastWalk = null;
+function schedSig() {
+  if (sigMemo !== null) return sigMemo;   // worked out once per task (a screen draw asks for many days in a row)
+  queueMicrotask(() => { sigMemo = null; });
+  return (sigMemo = schedSigNow());
+}
+function schedSigNow() {
+  const ap = data.activePlan, plan = ap && planById(ap.planId), tk = todayKey();
+  if (!plan) return { all: tk + '|none', past: '' };
+  const wi = new Map(), trained = ix().byDate;
+  plan.days.forEach((d, i) => { if (d.workoutId && !wi.has(d.workoutId)) wi.set(d.workoutId, i); });
+  let past = `${tk}|${ap.planId}|${ap.begin}|${ap.start}|${plan.weeks}|${plan.days.map(d => d.workoutId && woById(d.workoutId) ? d.workoutId : '-').join(',')}|`, fut = '';
+  for (const k in data.days) {
+    if (k < ap.begin) continue;
+    const d = data.days[k];
+    let e = k;
+    if (d.rest) e += 'r' + (d.absorb || '');
+    if (d.pinned) e += 'p';
+    if (d.items.length) e += 'i';
+    if (d.plan) e += d.plan.id === ap.planId ? 'P' + d.plan.index : 'x';
+    if (d.workouts) for (const w of d.workouts) { const i = wi.get(w.id); e += i === undefined ? '?' : 'w' + i; }
+    if (trained.has(k)) e += 't';
+    if (k < tk) past += e + ';'; else fut += e + ';';
+  }
+  return { past, all: past + '|' + fut };
+}
 function planSchedule() {
-  const tk = todayKey();
-  if (schedCache && schedCache.tk === tk) return schedCache;
-  const out = schedCache = { tk, map: {}, plan: null, ap: null };
+  const tk = todayKey(), sig = schedSig();
+  if (schedCache && schedCache.sig === sig.all && schedCache.sets === data.sets) return schedCache;
+  const out = schedCache = { tk, sig: sig.all, sets: data.sets, map: {}, plan: null, ap: null };
   const ap = activePlan(); if (!ap) return out;
   const plan = planById(ap.planId), len = plan.days.length;
+  const isW = plan.days.map((_, i) => isPlanWorkout(plan, i));   // looked up once, not on every day
   out.plan = plan; out.ap = ap;
-  if (!len || !plan.days.some((_, i) => isPlanWorkout(plan, i))) return out;
-  const trained = new Set(data.sets.map(s => s.date));
+  if (!len || !isW.some(Boolean)) return out;
+  const trained = ix().byDate;
   const end = planEnd(ap, plan);
-  const restIdx = plan.days.map((_, i) => i).filter(i => !isPlanWorkout(plan, i));
+  const restIdx = plan.days.map((_, i) => i).filter(i => !isW[i]);
   let pos = ((daysBetween(ap.start, ap.begin) % len) + len) % len;
-  const skips = [], absorbs = [];
+  let skips = [], absorbs = [], n = 0;
+  if (pastWalk && pastWalk.sig === sig.past) { pos = pastWalk.pos; skips = pastWalk.skips.slice(); absorbs = pastWalk.absorbs.slice(); n = pastWalk.n; }
   // The entry that's due now (after skipping workouts done early and rest days used up by a move)
   const due = () => {
     for (let guard = 0; guard < len * 4; guard++) {
       const i = pos % len, si = skips.indexOf(i);
       if (si >= 0) { skips.splice(si, 1); pos++; continue; }
-      if (!isPlanWorkout(plan, i)) { const ai = absorbs.findIndex(a => a === null || a === i); if (ai >= 0) { absorbs.splice(ai, 1); pos++; continue; } }
+      if (!isW[i]) { const ai = absorbs.findIndex(a => a === null || a === i); if (ai >= 0) { absorbs.splice(ai, 1); pos++; continue; } }
       return i;
     }
     return pos % len;
@@ -1511,22 +1697,25 @@ function planSchedule() {
   };
   // A plan workout done (or put) on a day: in turn moves the plan on; out of turn skips its next turn
   const place = j => { const i = due(); if (i === j) pos++; else skips.push(j); };
-  const horizon = dk(addDays(parse(tk), 400));
-  for (let k = ap.begin; k <= horizon; k = dk(addDays(parse(k), 1))) {
-    if (end && k >= end) break;
+  const horizon = dk(addDays(parse(tk), 400)), d0 = parse(ap.begin), y0 = d0.getFullYear(), m0 = d0.getMonth(), n0 = d0.getDate();
+  let atToday = false;
+  for (; ; n++) {
+    const k = dk(new Date(y0, m0, n0 + n));
+    if (k > horizon || (end && k >= end)) break;
+    if (!atToday && k >= tk) { atToday = true; pastWalk = { sig: sig.past, pos, skips: skips.slice(), absorbs: absorbs.slice(), n }; }
     const st = data.days[k], tr = trained.has(k);
     if (st && st.rest && !st.items.length && !tr) { addAbsorb(st.absorb); if (k >= tk) out.map[k] = { extra: true, absorb: st.absorb || null }; continue; }
     if (k < tk) {
       const j = tr ? planIndexOf(st, plan) : null;
       if (j !== null) { place(j); continue; }
-      if (!isPlanWorkout(plan, due())) pos++;          // a rest day passes; a missed workout keeps waiting
+      if (!isW[due()]) pos++;          // a rest day passes; a missed workout keeps waiting
       continue;
     }
     // today and later
     const own = st && (tr || st.pinned || (!st.plan && st.items.length));
     const j = own ? planIndexOf(st, plan) : null;
     if (j !== null) { place(j); out.map[k] = { index: j, own: true }; continue; }
-    if (own) { out.map[k] = { other: true }; if (!isPlanWorkout(plan, due())) pos++; continue; }   // you're doing something else that day
+    if (own) { out.map[k] = { other: true }; if (!isW[due()]) pos++; continue; }   // you're doing something else that day
     out.map[k] = { index: due() }; pos++;
   }
   return out;
@@ -1551,7 +1740,7 @@ function purgeStalePlanDays() {
   let changed = false;
   for (const k in data.days) {
     const d = data.days[k];
-    if (k < tk || !d.plan || d.pinned || d.rest || d.session || data.sets.some(s => s.date === k)) continue;
+    if (k < tk || !d.plan || d.pinned || d.rest || d.session || hasSets(k)) continue;
     const e = sc.map[k];
     if (!e || e.index !== d.plan.index) { delete data.days[k]; changed = true; }
   }
@@ -1580,7 +1769,7 @@ function moveBack(k, absorb) {
 }
 function unrest(k) {
   const d = data.days[k];
-  if (d && d.rest && !d.items.length && !data.sets.some(s => s.date === k)) delete data.days[k];
+  if (d && d.rest && !d.items.length && !hasSets(k)) delete data.days[k];
   save();
 }
 // On a rest day: do the next workout today (the rest days it jumped over come after it)
@@ -1594,7 +1783,7 @@ function pinToday() {
   go('day');
   toast(`<span class="tic" style="background:var(--tint-soft);color:var(--tint)">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.4)}</span><span>${esc(nx.workout.name)} is on today<small>The rest of your plan stays the same</small></span>`);
 }
-const unpin = k => { const d = data.days[k]; if (d && d.pinned && !data.sets.some(s => s.date === k) && !d.session) delete data.days[k]; save(); };
+const unpin = k => { const d = data.days[k]; if (d && d.pinned && !hasSets(k) && !d.session) delete data.days[k]; save(); };
 
 /* Sheet: move a planned workout back a day, with a preview of each choice */
 const dayLabelFor = k => { const st = data.days[k], pd = planDayFor(k);
@@ -1603,10 +1792,10 @@ function previewDays(from, absorb, n = 7) {
   const saved = data.days[from];
   data.days[from] = { items: [], workouts: [], rest: true };
   if (absorb) data.days[from].absorb = absorb;
-  schedCache = null;
+  schedCache = null; sigMemo = null;
   const out = Array.from({ length: n }, (_, i) => { const k = dk(addDays(parse(from), i)); return { k, name: dayLabelFor(k) }; });
   if (saved) data.days[from] = saved; else delete data.days[from];
-  schedCache = null;
+  schedCache = null; sigMemo = null;
   return out;
 }
 function sheetMoveBack(el) {
@@ -1670,7 +1859,7 @@ function renderPlanView() {
     ${isActive ? `
       <div class="section">Coming up</div>
       <div class="group">${coming.map(k => {
-        const d = dayOf(k), pd = planDayFor(k), done = data.sets.some(s => s.date === k);
+        const d = dayOf(k), pd = planDayFor(k), done = hasSets(k);
         const label = d.items.length ? (d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Custom workout') : pd && pd.extra ? 'Rest (moved)' : 'Rest';
         return cell({ attrs: `data-goday="${k}"`, main: `${k === tk ? 'Today' : k === dk(addDays(parse(tk), 1)) ? 'Tomorrow' : fmtShort(k)}`,
           detail: `<span style="color:${d.items.length ? 'var(--label)' : 'var(--label2)'}">${label}${done ? ' ✓' : ''}</span>` });
@@ -1686,7 +1875,7 @@ function renderPlanView() {
   if ($('endP')) $('endP').onclick = () => {
     if (state.pending !== 'endP') { state.pending = 'endP'; return render(); }
     // Keep days already filled in; future planned days disappear
-    for (const k in data.days) if (k >= tk && (data.days[k].plan || data.days[k].rest) && !data.sets.some(s => s.date === k) && !data.days[k].session) delete data.days[k];
+    for (const k in data.days) if (k >= tk && (data.days[k].plan || data.days[k].rest) && !hasSets(k) && !data.days[k].session) delete data.days[k];
     data.activePlan = null; save(); state.pending = null; render();
   };
 }
@@ -1782,7 +1971,7 @@ function sheetPlanStart(el) {
   $('sCancel').onclick = () => closeSheet();
   $('sGo').onclick = () => {
     const first = s.date, startIdx = wheelIndex('wDay');
-    for (const k in data.days) if (k >= todayKey() && (data.days[k].plan || data.days[k].rest) && !data.sets.some(x => x.date === k) && !data.days[k].session) delete data.days[k];
+    for (const k in data.days) if (k >= todayKey() && (data.days[k].plan || data.days[k].rest) && !hasSets(k) && !data.days[k].session) delete data.days[k];
     data.activePlan = { planId: p.id, begin: first, start: dk(addDays(parse(first), -startIdx)) };
     save(); state.sheet = null;
     render();
@@ -1893,7 +2082,17 @@ const COLS = {
 const hash = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
 const syncKey = uid => 'tt.sync.' + uid;
 const loadSync = uid => { try { return JSON.parse(localStorage.getItem(syncKey(uid))) || null; } catch (e) { return null; } };
-const saveSync = () => { try { if (cloud.user) localStorage.setItem(syncKey(cloud.user.uid), JSON.stringify(cloud.sync)); } catch (e) {} };
+// What was last synced is written a moment later (it's large and changes in bursts); always before the app is put away
+const saveSyncNow = () => { clearTimeout(saveSyncNow.t); saveSyncNow.t = null; try { if (cloud.user && cloud.sync) localStorage.setItem(syncKey(cloud.user.uid), JSON.stringify(cloud.sync)); } catch (e) {} };
+const saveSync = () => { if (!saveSyncNow.t) saveSyncNow.t = setTimeout(saveSyncNow, 1500); };
+// A set only ever changes its weight, reps or slot, so its hash is remembered until one of those changes
+const recHashes = new WeakMap();
+function recHash(col, rec) {
+  if (col !== 'sets') return hash(JSON.stringify(rec));
+  const c = recHashes.get(rec);
+  if (c && c.w === rec.weight && c.r === rec.reps && c.s === rec.slot) return c.h;
+  const h = hash(JSON.stringify(rec)); recHashes.set(rec, { w: rec.weight, r: rec.reps, s: rec.slot, h }); return h;
+}
 const stripRec = d => { const r = { ...d }; delete r.u; delete r.deleted; return r; };
 
 function setCloudStatus(s, err = '') {
@@ -1918,7 +2117,7 @@ async function initCloud() {
       stopLibrary();
       cloud.user = user;
       if (user) startSync(); else setCloudStatus('off');
-      if (!state.sheet || state.sheet.type !== 'signin') render();
+      if (!state.sheet || state.sheet.type !== 'signin') bgRender();
     });
     cloud.ready = true;
   } catch (e) {
@@ -1970,7 +2169,7 @@ async function startSync() {
       }
       saveSync();
       saveLocal();
-      if (!state.sheet) render();
+      if (!state.sheet) bgRender();
     }
     listen();
     startFriends();
@@ -1984,7 +2183,14 @@ async function startSync() {
 // Live updates from your other devices
 function listen() {
   const fb = cloud.fb, uid = cloud.user.uid;
-  const since = Math.max(0, (cloud.sync.since || 0) - 5 * 60 * 1000); // small margin for clock differences
+  // The query stays the same from one launch to the next (it moves on about once a month): Firestore can then answer it
+  // from its last answer plus what changed, instead of reading every record kept on the phone to work it out again.
+  // (Records it returns that haven't changed are skipped below, so starting a bit further back costs very little.)
+  if (!cloud.sync.from || (cloud.sync.since || 0) - cloud.sync.from > 30 * 864e5) {
+    cloud.sync.from = Math.max(0, (cloud.sync.since || 0) - 5 * 60 * 1000);   // small margin for clock differences
+    saveSync();
+  }
+  const since = cloud.sync.from;
   for (const col of Object.keys(COLS)) {
     const q = fb.query(fb.collection(cloud.db, 'users', uid, col), fb.where('u', '>', since));
     cloud.unsubs.push(fb.onSnapshot(q, snap => {
@@ -2006,7 +2212,7 @@ function listen() {
         if (col === 'meta') applyTheme();
         saveLocal();
         const typing = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
-        if (!typing && !state.sheet) render();
+        if (!typing && !state.sheet) bgRender();
       }
       if (!snap.metadata.fromCache && cloud.status !== 'syncing') setCloudStatus('synced');
     }, e => setCloudStatus('error', e.code || e.message)));
@@ -2016,19 +2222,25 @@ function stopListening() { cloud.unsubs.forEach(u => u()); cloud.unsubs = []; }
 
 // Send local changes (compares each record with what was last synced)
 function scheduleSync() { if (!cloud.user || !cloud.sync) return; clearTimeout(cloud.timer); cloud.timer = setTimeout(pushChanges, 600); }
-async function pushChanges() {
-  if (!cloud.user || !cloud.sync || cloud.deleting) return;
-  const fb = cloud.fb, uid = cloud.user.uid, now = Date.now();
+// Records that differ from what was last synced (and deleted ones)
+function syncOps(now) {
   const ops = [];
   for (const col of Object.keys(COLS)) {
     const local = COLS[col].get();
     const map = cloud.sync.maps[col] = cloud.sync.maps[col] || {};
     for (const id in local) {
-      const h = hash(JSON.stringify(local[id]));
+      const h = recHash(col, local[id]);
       if (map[id] !== h) ops.push({ col, id, body: { ...JSON.parse(JSON.stringify(local[id])), u: now }, h });
     }
     for (const id in map) if (!(id in local)) ops.push({ col, id, body: { deleted: true, u: now }, h: null });
   }
+  return ops;
+}
+async function pushChanges() {
+  clearTimeout(cloud.timer); cloud.timer = null;
+  if (!cloud.user || !cloud.sync || cloud.deleting) return;
+  const fb = cloud.fb, uid = cloud.user.uid;
+  const ops = syncOps(Date.now());
   if (!ops.length) { if (cloud.status !== 'error') setCloudStatus(navigator.onLine ? 'synced' : 'offline'); return; }
   setCloudStatus('syncing');
   try {
@@ -2118,7 +2330,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.25';
+const APP_VERSION = '0.26';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2256,8 +2468,8 @@ function startFriends() {
     friends.links = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     friends.links.forEach(l => { if (!l.names || l.names[uid] !== myName()) fb.updateDoc(fb.doc(cloud.db, 'links', l.id), { ['names.' + uid]: myName(), u: Date.now() }).catch(() => {}); });
     renderDock();
-    if (['friends', 'friend'].includes(state.views.friends) && state.tab === 'friends' && !state.sheet) render();
-  }, e => { friends.error = isPerm(e) ? 'rules' : (e.code || e.message); if (state.tab === 'friends') render(); });
+    if (['friends', 'friend'].includes(state.views.friends) && state.tab === 'friends' && !state.sheet) bgRender();
+  }, e => { friends.error = isPerm(e) ? 'rules' : (e.code || e.message); if (state.tab === 'friends') bgRender(); });
   startGifts();
   if (state.inviteCode) openSheet({ type: 'addFriend', code: state.inviteCode, auto: true }), (state.inviteCode = null);
 }
@@ -2288,12 +2500,12 @@ async function ensureCode() {
         if (old) fb.getDoc(fb.doc(cloud.db, 'codes', old)).then(d => { if (d.exists() && d.data().uid === uid) fb.deleteDoc(d.ref || fb.doc(cloud.db, 'codes', old)); }).catch(() => {});
         data.settings.code = code; save();
       }
-      if (state.tab === 'friends') render();
+      if (state.tab === 'friends') bgRender();
       return;
     }
   } catch (e) {
     friends.error = isPerm(e) ? 'rules' : (e.code || e.message);
-    if (state.tab === 'friends') render();
+    if (state.tab === 'friends') bgRender();
   }
 }
 function syncMyNameSoon() {
@@ -2455,7 +2667,7 @@ function renderFriend() {
   wireGiftHistory(l);
   if (theyShare && !c && !state.friendLoading) {
     state.friendLoading = true; state.friendErr = '';
-    loadFriend(o).then(() => { state.friendLoading = false; if (state.views.friends === 'friend') render(); })
+    loadFriend(o).then(() => { state.friendLoading = false; if (state.views.friends === 'friend') bgRender(); })
       .catch(e => { state.friendLoading = false; state.friendErr = isPerm(e) ? "Couldn't load — check that the new Firebase rules are published." : (e.code || e.message); if (state.views.friends === 'friend') render(); });
   }
 }
@@ -2525,7 +2737,7 @@ function importPlan(pp, from) {
 function startGifts() {
   const fb = cloud.fb, uid = cloud.user.uid;
   friends.gifts = { in: [], out: [], seen: null, error: '' };
-  const onErr = e => { friends.gifts.error = isPerm(e) ? 'rules' : (e.code || e.message); if (state.tab === 'friends') render(); };
+  const onErr = e => { friends.gifts.error = isPerm(e) ? 'rules' : (e.code || e.message); if (state.tab === 'friends') bgRender(); };
   const col = fb.collection(cloud.db, 'gifts');
   friends.giftUnsubs = [
     fb.onSnapshot(fb.query(col, fb.where('to', '==', uid)), snap => {
@@ -2549,7 +2761,7 @@ const pendingGifts = () => (friends.gifts ? friends.gifts.in.filter(g => g.statu
 function giftsChanged() {
   renderDock();
   const v = state.views.friends;
-  if (state.tab === 'friends' && (v === 'friends' || v === 'friend') && !state.sheet) render();
+  if (state.tab === 'friends' && (v === 'friends' || v === 'friend') && !state.sheet) bgRender();
   else if (state.sheet && state.sheet.type === 'gift') renderSheet();
 }
 
@@ -2775,9 +2987,11 @@ function cleanLibEntry(docId, d) {
 /* ================= Leaving: sign out, delete account ================= */
 // Remove your training from this phone (your cloud copy is untouched unless you deleted your account)
 async function wipeDevice(uid) {
+  clearTimeout(saveSyncNow.t); saveSyncNow.t = null; cloud.sync = null;   // nothing may be written back after this
   const keep = { units: data.settings.units, theme: data.settings.theme, weekStart: data.settings.weekStart, defaultSets: data.settings.defaultSets };
   try {
     ['tt.v1', 'tt.owner', 'tt.rest', 'tt.lib', 'tt.sync.' + uid, 'tt.v1.' + uid].forEach(k => localStorage.removeItem(k));
+    Object.keys(localStorage).filter(k => k.startsWith(SKEY)).forEach(k => localStorage.removeItem(k));   // the sets, kept per month
     localStorage.setItem('tt.v1', JSON.stringify(migrate({ exercises: [], days: {}, sets: [], workouts: [], settings: keep })));
   } catch (e) {}
   // Firestore keeps its own offline copy on the phone too
@@ -2788,6 +3002,7 @@ async function signOutNow(removeHere) {
   const uid = cloud.user && cloud.user.uid;
   try { await pushChanges(); } catch (e) {}
   stopListening(); stopFriends(); stopLibrary();
+  saveSyncNow();
   await cloud.fb.signOut(cloud.auth);
   if (removeHere && uid) await wipeDevice(uid);
 }
@@ -2890,7 +3105,7 @@ const profName = () => { if (state.prof === 'me') return myLabel(); const l = fr
 function profDates(c) {
   const tk = todayKey();
   const sess = Object.keys(c.days).filter(k => k <= tk && c.days[k].session && (c.days[k].session.end || k === tk));
-  return [...new Set([...c.sets.map(s => s.date).filter(k => k <= tk), ...sess])].sort().reverse();
+  return [...new Set([...[...ix(c.sets).byDate.keys()].filter(k => k <= tk), ...sess])].sort().reverse();
 }
 const relDay = k => {
   const n = daysBetween(k, todayKey());
@@ -2901,7 +3116,7 @@ const relDay = k => {
 const setTxt = s => +s.weight > 0 ? `${W(+s.weight)} ${U()} × ${s.reps | 0}` : `${s.reps | 0} reps`;
 const workoutTitle = (c, k) => { const d = c.days[k]; return d && d.workouts && d.workouts.length ? d.workouts.map(w => esc(w.name)).join(' + ') : 'Custom workout'; };
 function workoutRowHTML(c, k) {
-  const ss = c.sets.filter(s => s.date === k), d = c.days[k];
+  const ss = setsOn(k, c.sets), d = c.days[k];
   const nEx = new Set(ss.map(s => s.exId)).size;
   const bits = [relDay(k)];
   if (nEx) bits.push(plural(nEx, 'exercise'), plural(ss.length, 'set')); else bits.push('No sets logged');
@@ -2965,7 +3180,7 @@ function renderProfWorkouts() {
 }
 function renderProfWorkout() {
   const c = profSrc(); if (!c) return go(profRoot());
-  const k = state.pwDate, d = c.days[k], ss = c.sets.filter(s => s.date === k);
+  const k = state.pwDate, d = c.days[k], ss = setsOn(k, c.sets);
   const exIds = [...new Set(ss.slice().sort((a, b) => a.ts - b.ts).map(s => s.exId))];
   const exName = id => { const e = c.exercises.find(x => x.id === id); return e ? e.name : 'Exercise'; };
   const dur = d && d.session ? (d.session.end ? ` · ${fmtMins(d.session.end - d.session.start)}` : ' · in progress') : '';
@@ -2974,7 +3189,7 @@ function renderProfWorkout() {
     <div class="eyebrow">${esc(profName())} · ${fmtLong(k)}${dur}</div>
     <div class="large-title">${workoutTitle(c, k)}</div>
     ${exIds.length ? `<div class="group">${exIds.map(id => cell({ attrs: `data-pe="${id}"`, main: esc(exName(id)),
-        sub: ss.filter(s => s.exId === id).sort((a, b) => a.slot - b.slot).map(setTxt).join(' · ') })).join('')}</div>
+        sub: setsOf(id, k, c.sets).map(setTxt).join(' · ') })).join('')}</div>
       <div class="footnote">${plural(ss.length, 'set')} logged. Tap an exercise to see its progress.</div>`
       : '<div class="group"><div class="empty">No sets logged.</div></div>'}`;
   $('back').onclick = () => go(backOf('pWorkout'));
@@ -2987,11 +3202,19 @@ const MUSCLES = [['chest', 'Chest'], ['back', 'Back'], ['shoulders', 'Shoulders'
 const EQUIP = [['barbell', 'Barbell'], ['dumbbell', 'Dumbbell'], ['machine', 'Machine'], ['cable', 'Cable'], ['bodyweight', 'Bodyweight'], ['kettlebell', 'Kettlebell'], ['other', 'Other']];
 const muscleName = k => (MUSCLES.find(m => m[0] === k) || [, ''])[1];
 const equipName = k => (EQUIP.find(m => m[0] === k) || [, ''])[1];
-const normName = n => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const normMemo = new Map();
+const normName = n => { const k = String(n || ''); let v = normMemo.get(k); if (v === undefined) { v = k.toLowerCase().replace(/[^a-z0-9]/g, ''); if (normMemo.size > 5000) normMemo.clear(); normMemo.set(k, v); } return v; };
 const LIB_RAW = 'Bench press|chest|barbell\nIncline bench press|chest|barbell\nDecline bench press|chest|barbell\nClose-grip bench press|arms|barbell\nDumbbell bench press|chest|dumbbell\nIncline dumbbell press|chest|dumbbell\nDumbbell fly|chest|dumbbell\nIncline dumbbell fly|chest|dumbbell\nMachine chest press|chest|machine\nIncline machine press|chest|machine\nPec deck|chest|machine\nCable fly|chest|cable\nLow-to-high cable fly|chest|cable\nSmith machine bench press|chest|machine\nPush-up|chest|bodyweight\nDip|chest|bodyweight\nDeadlift|back|barbell\nSumo deadlift|back|barbell\nBarbell row|back|barbell\nPendlay row|back|barbell\nT-bar row|back|barbell\nRack pull|back|barbell\nDumbbell row|back|dumbbell\nChest-supported dumbbell row|back|dumbbell\nDumbbell pullover|back|dumbbell\nPull-up|back|bodyweight\nChin-up|back|bodyweight\nInverted row|back|bodyweight\nLat pulldown|back|cable\nClose-grip lat pulldown|back|cable\nStraight-arm pulldown|back|cable\nSeated cable row|back|cable\nSingle-arm cable row|back|cable\nMachine row|back|machine\nAssisted pull-up|back|machine\nBack extension|back|bodyweight\nShrug|back|barbell\nDumbbell shrug|back|dumbbell\nOverhead press|shoulders|barbell\nPush press|shoulders|barbell\nSeated dumbbell shoulder press|shoulders|dumbbell\nArnold press|shoulders|dumbbell\nLateral raise|shoulders|dumbbell\nFront raise|shoulders|dumbbell\nRear delt fly|shoulders|dumbbell\nUpright row|shoulders|barbell\nMachine shoulder press|shoulders|machine\nMachine lateral raise|shoulders|machine\nReverse pec deck|shoulders|machine\nCable lateral raise|shoulders|cable\nFace pull|shoulders|cable\nCable rear delt fly|shoulders|cable\nBarbell curl|arms|barbell\nEZ-bar curl|arms|barbell\nPreacher curl|arms|barbell\nDumbbell curl|arms|dumbbell\nHammer curl|arms|dumbbell\nIncline dumbbell curl|arms|dumbbell\nConcentration curl|arms|dumbbell\nCable curl|arms|cable\nMachine preacher curl|arms|machine\nSkull crusher|arms|barbell\nOverhead dumbbell triceps extension|arms|dumbbell\nDumbbell kickback|arms|dumbbell\nTriceps pushdown|arms|cable\nRope pushdown|arms|cable\nOverhead cable triceps extension|arms|cable\nMachine triceps extension|arms|machine\nBench dip|arms|bodyweight\nWrist curl|arms|dumbbell\nReverse curl|arms|barbell\nBack squat|legs|barbell\nFront squat|legs|barbell\nBox squat|legs|barbell\nRomanian deadlift|legs|barbell\nGood morning|legs|barbell\nBarbell lunge|legs|barbell\nGoblet squat|legs|dumbbell\nBulgarian split squat|legs|dumbbell\nDumbbell lunge|legs|dumbbell\nWalking lunge|legs|dumbbell\nDumbbell Romanian deadlift|legs|dumbbell\nStep-up|legs|dumbbell\nLeg press|legs|machine\nHack squat|legs|machine\nSmith machine squat|legs|machine\nLeg extension|legs|machine\nLying leg curl|legs|machine\nSeated leg curl|legs|machine\nStanding calf raise|legs|machine\nSeated calf raise|legs|machine\nLeg press calf raise|legs|machine\nPendulum squat|legs|machine\nBelt squat|legs|machine\nNordic curl|legs|bodyweight\nBodyweight squat|legs|bodyweight\nHip thrust|glutes|barbell\nGlute bridge|glutes|barbell\nDumbbell hip thrust|glutes|dumbbell\nSingle-leg hip thrust|glutes|bodyweight\nMachine hip thrust|glutes|machine\nHip abduction|glutes|machine\nHip adduction|legs|machine\nGlute kickback machine|glutes|machine\nCable kickback|glutes|cable\nCable pull-through|glutes|cable\nFrog pump|glutes|bodyweight\nKettlebell swing|glutes|kettlebell\nPlank|core|bodyweight\nCrunch|core|bodyweight\nHanging leg raise|core|bodyweight\nHanging knee raise|core|bodyweight\nLying leg raise|core|bodyweight\nAb wheel rollout|core|other\nRussian twist|core|bodyweight\nDead bug|core|bodyweight\nCable crunch|core|cable\nPallof press|core|cable\nCable woodchopper|core|cable\nMachine crunch|core|machine\nDecline sit-up|core|bodyweight\nSide plank|core|bodyweight\nKettlebell goblet squat|legs|kettlebell\nKettlebell deadlift|legs|kettlebell\nTurkish get-up|full|kettlebell\nFarmer\'s carry|full|dumbbell\nPower clean|full|barbell\nClean and jerk|full|barbell\nSnatch|full|barbell\nThruster|full|barbell';
 const LIB_BUILTIN = LIB_RAW.split('\n').map(l => { const [name, muscle, equip] = l.split('|'); return { id: 'b:' + normName(name), name, muscle, equip, builtin: true }; });
 const lib = { shared: (() => { try { return (JSON.parse(localStorage.getItem('tt.lib')) || []).map(x => cleanLibEntry(x.docId, x)).filter(Boolean); } catch (e) { return []; } })(), unsub: null, admin: false, error: '' };
-const libAll = () => [...LIB_BUILTIN, ...lib.shared.filter(x => !LIB_BUILTIN.some(b => normName(b.name) === normName(x.name)))].sort(byName);
+const LIB_NAMES = new Set(LIB_BUILTIN.map(b => normName(b.name)));
+let libAllMemo = null;   // the combined list is rebuilt only when the shared entries change
+const libAll = () => {
+  if (libAllMemo && libAllMemo.src === lib.shared && libAllMemo.n === lib.shared.length) return libAllMemo.list;
+  const list = [...LIB_BUILTIN, ...lib.shared.filter(x => !LIB_NAMES.has(normName(x.name)))].sort(byName);
+  libAllMemo = { src: lib.shared, n: lib.shared.length, list };
+  return list;
+};
 const libById = id => libAll().find(x => x.id === id);
 const libByName = n => libAll().find(x => normName(x.name) === normName(n));
 const mineFor = entry => data.exercises.find(e => e.lib === entry.id || normName(e.name) === normName(entry.name));
@@ -3005,7 +3228,7 @@ function startLibrary() {
     try { localStorage.setItem('tt.lib', JSON.stringify(lib.shared)); } catch (e) {}
     lib.error = '';
     const v = state.views[state.tab];
-    if (!state.sheet && (v === 'lib' || v === 'eList' || v === 'picker') && !(document.activeElement && document.activeElement.tagName === 'INPUT')) render();
+    if (!state.sheet && (v === 'lib' || v === 'eList' || v === 'picker') && !(document.activeElement && document.activeElement.tagName === 'INPUT')) bgRender();
   }, e => { lib.error = isPerm(e) ? 'rules' : (e.code || e.message); });
   fb.getDoc(fb.doc(cloud.db, 'admins', me)).then(d => { lib.admin = d.exists(); }).catch(() => {});
 }
@@ -3134,7 +3357,7 @@ function renderFriendExercise() {
     ${cached ? (state.statSrc = cached.sets, progressHTML(ex.id) + historyHTML(ex.id)) : SKELETON}`;
   $('back').onclick = () => go(backOf('fEx'));
   if (cached) { wireProgress(ex.id); state.statSrc = null; }
-  else loadFriendExercise(o, ex.id).then(() => { if (state.views.friends === 'fEx') render(); }).catch(() => {});
+  else loadFriendExercise(o, ex.id).then(() => { if (state.views.friends === 'fEx') bgRender(); }).catch(() => {});
 }
 
 /* Sheet: add a friend by code */
@@ -3196,6 +3419,7 @@ function sheetAcceptFriend(el) {
 /* ================= Swipe down to close ================= */
 // Pull a slid-up screen (or a sheet) down from the top to close it. It follows your finger,
 // the screen underneath grows back into place, and letting go early springs it back.
+let pullSync = () => {};
 const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', history: 'log', eDetail: 'eList', pView: 'wList', friend: 'friends', me: 'friends',
                     pWorkouts: 1, pWorkout: 1, fEx: 1, lib: 1 };   // 1 = depends on where you came from (backOf)
 (function pullToClose() {
@@ -3213,7 +3437,9 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
     p = { ...base, kind: 'screen' };
   }, { passive: true });
 
-  document.addEventListener('touchmove', e => {
+  // This handler can cancel scrolling, so while it's attached iOS waits for it on every finger move. It's only attached
+  // where pulling down can close something (deeper screens, open sheets); on the main tabs scrolling never waits for it.
+  const move = e => {
     if (!p) return;
     const t = e.touches[0];
     const dx = t.clientX - p.x, dy = t.clientY - p.y;
@@ -3231,7 +3457,14 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
     const k = Math.min(1, p.dy / window.innerHeight);
     if (p.kind === 'screen') { app.style.transform = `scale(${.94 + .06 * k})`; app.style.opacity = .5 + .5 * k; }
     else if (p.backdrop) p.backdrop.style.opacity = 1 - k * 1.5;
-  }, { passive: false });
+  };
+  let attached = false;
+  pullSync = () => {
+    const need = !!state.sheet || !!backOf(state.views[state.tab]);
+    if (need === attached || (!need && p)) return;   // never taken away in the middle of a pull
+    if (need) document.addEventListener('touchmove', move, { passive: false }); else document.removeEventListener('touchmove', move, { passive: false });
+    attached = need;
+  };
 
   function start() {
     if (p.kind === 'sheet') {
@@ -3252,8 +3485,9 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
   }
 
   const end = () => {
-    if (!p || p.axis !== 'down') { p = null; return; }
+    if (!p || p.axis !== 'down') { p = null; pullSync(); return; }
     const q = p; p = null;
+    setTimeout(pullSync, 400);
     const close = q.dy > 110 || (q.v > 0.5 && q.dy > 40);
     q.layer.style.transition = `transform ${ease}`;
     if (q.kind === 'sheet') {
@@ -3301,9 +3535,10 @@ function renderSheet() {
       g.querySelectorAll('.wheel-scroll').forEach((w, i) => { w.scrollTop = wheels[i]; });
       setTimeout(() => g.remove(), 380);
     }
-    el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); return;
+    el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); pullSync(); return;
   }
   el.hidden = false; document.body.classList.add('locked');
+  pullSync();
   ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration, signin: sheetSignin,
      planDay: sheetPlanDay, planStart: sheetPlanStart, moveBack: sheetMoveBack, sendTo: sheetSendTo, sendPick: sheetSendPick, gift: sheetGift, signout: sheetSignOut, deleteAccount: sheetDeleteAccount,
      addFriend: sheetAddFriend, acceptFriend: sheetAcceptFriend })[state.sheet.type](el);
@@ -3327,7 +3562,7 @@ function sheetExForm(el) {
   const linked = ex && ex.lib ? libById(ex.lib) : null;                 // copied from the database
   const fromDb = linked && !s.sharedOwn;
   const dupe = !fromDb && s.name.trim() && libByName(s.name) && !(ex && ex.lib === libByName(s.name).id) ? libByName(s.name) : null;
-  const setCount = ex ? data.sets.filter(x => x.exId === ex.id).length : 0;
+  const setCount = ex ? exSets(ex.id).length : 0;
   const title = ex ? 'Edit Exercise' : 'New Exercise';
   el.innerHTML = sheetOpen(title,
     `${closeBtn('sCancel')}<b>${title}</b>${okBtn('sSave')}`,
@@ -3477,7 +3712,7 @@ function closeStaleSessions() {
   for (const k in data.days) {
     const s = data.days[k].session;
     if (!s || s.end || k >= tk) continue;
-    const ts = data.sets.filter(x => x.date === k).map(x => x.ts);
+    const ts = setsOn(k).map(x => x.ts);
     if (ts.length) s.end = Math.max(s.start + 60000, ...ts); else delete data.days[k].session;
     changed = true;
   }
@@ -3488,10 +3723,37 @@ linkExistingToLib();
 if (rest && rest.start && rest.date === todayKey() && !isFinished(rest.date)) renderRest(); else if (rest) stopRest();
 applyTheme();
 render();
-initCloud();
-try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); if (!state.sheet) render(); }); } catch (e) {}
+// Sign-in and sync load just after the first screen is on the glass, at a moment your finger isn't moving
+// (starting them is a burst of work that would otherwise land on your first scroll or tap), and within 2 seconds at most
+requestAnimationFrame(() => {
+  const t0 = performance.now();
+  const start = () => { if ((touching || performance.now() - lastScroll < 200) && performance.now() - t0 < 2000) return setTimeout(start, 150); initCloud(); };
+  setTimeout(start, 120);
+});
+// When the app is put away: anything not yet written or sent goes now (iOS may close it without warning after this)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'hidden') return;
+  if (cloud.timer) { clearTimeout(cloud.timer); cloud.timer = null; pushChanges(); }
+  saveSyncNow();
+});
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); if (!state.sheet) bgRender(); }); } catch (e) {}
 
 /* ================= Offline support ================= */
+// The app opens from its own cache (instant, works offline). A new version installs in the background; if it's ready
+// within the first seconds after opening, before you've touched anything, the app reloads into it right away.
+// Otherwise it's used the next time the app is opened.
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+  const sw = navigator.serviceWorker, hadController = !!sw.controller, opened = Date.now();
+  let touched = false;
+  const touch = () => { touched = true; };
+  addEventListener('pointerdown', touch, { capture: true, once: true });
+  addEventListener('keydown', touch, { capture: true, once: true });
+  sw.addEventListener('controllerchange', () => {
+    if (hadController && !touched && Date.now() - opened < 20000 && !state.sheet && !np) location.reload();
+  });
+  window.addEventListener('load', () => { sw.register('sw.js').catch(() => {}); });
+  // Coming back to the app: check for a new version
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') sw.getRegistration().then(r => r && r.update()).catch(() => {});
+  });
 }

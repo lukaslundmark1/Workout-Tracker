@@ -22,6 +22,26 @@ The mock signs `lukas@x.com` (password `secret1`) in as uid `u1`. In the page yo
 - `test-send.py`: end-to-end sending/receiving of workouts and plans (mock server).
 - `test-schedule.py`: Upper/Lower plan scenarios for "Move back a day".
 - `test-numpad.py`: the number pad (typing, ±, Next, ticking, editing a done set, hardware keys).
+- `test-gestures.py [port]`: simulated finger drags: pull down to close a screen and a sheet, swipe exercises and days.
+
+## Performance tools
+- `perf.py [port] [throttle] [days]`: seeds ~2 years of training (10,000 sets; `days` sets how much), then times every
+  main screen and the common actions with a 4x slower CPU, plus startup. Run it before and after a change.
+- `profile.py "<setup js>" "<timed js>"`: CPU profile of one step with the same data (which functions take the time).
+- `difftest.py OLD_PORT NEW_PORT`: serve the previous version (`git show HEAD:app.js` etc. into a folder) on one port and
+  the working copy on another; compares every screen's HTML, the plan schedule and day labels for 3 datasets.
+  Use it after any refactor that shouldn't change what the app shows.
+- `fuzz-schedule.py OLD_PORT NEW_PORT [steps]`: hundreds of random plan moves/ticks/undos in both versions, comparing
+  the schedule after each step.
+
+## Performance rules (v0.26)
+- Look sets up through the index (`setsOf`, `setsOn`, `hasSets`, `exSets`, `exDates`, `prevDateOf`), never by
+  filtering `data.sets`. Add sets with `push`, remove them by making a new array; that's what keeps the index valid.
+- Sets are stored per month (`tt.v1s.YYYY-MM`); `tt.v1` holds the rest. Only months that changed are rewritten.
+- Redraws triggered by sync/sign-in/friends go through `bgRender()` (waits for fingers, scrolling and transitions).
+- Long lists are drawn in chunks (history) or use `content-visibility` (database).
+- The plan schedule is cached by a fingerprint of what it reads (`schedSigNow`); if it starts reading something new,
+  add that to the fingerprint.
 
 Set fields are readonly (the app has its own number pad), so Playwright `.fill()` on `.w`/`.r` fails. Set them with
 `loc.evaluate("(e,v)=>{e.value=v;e.dispatchEvent(new Event('input'))}", "80")` or tap the pad keys `#numpad [data-k="8"]`.

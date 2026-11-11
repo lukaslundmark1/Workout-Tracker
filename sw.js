@@ -1,9 +1,9 @@
 // Bump this when you deploy a new version so old caches are cleared.
-const CACHE = 'tt-v35';
+const CACHE = 'tt-v36';
 const ASSETS = [
   './',
   './index.html',
-  './app.js?v=c3ca9f0136',
+  './app.js?v=24121872da',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
@@ -20,6 +20,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.registration.navigationPreload && self.registration.navigationPreload.disable().catch(() => {}))
   );
   self.clients.claim();
 });
@@ -28,12 +29,11 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
 
-  // Pages: try the network first so updates show up, fall back to cache offline.
+  // Pages: open instantly from this version's cache (no waiting on the network, even on bad gym Wi-Fi).
+  // A new version arrives as a new sw.js: it installs in the background and the app switches over (see app.js).
   if (req.mode === 'navigate') {
     e.respondWith(
-      fetch(req, { cache: 'no-cache' }) // always check for a newer version of the app
-        .then(res => { const copy = res.clone(); caches.open(CACHE).then(c => c.put('./index.html', copy)); return res; })
-        .catch(() => caches.match('./index.html'))
+      caches.open(CACHE).then(c => c.match('./index.html')).then(hit => hit || fetch(req).catch(() => caches.match('./index.html')))
     );
     return;
   }
