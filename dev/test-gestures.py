@@ -28,15 +28,15 @@ async def main():
         # 1. pull down on an exercise page closes it
         await pg.evaluate("state.tab='today'; go('log',{logExId:'bp'})"); await W(700)
         await drag(cdp, 200, 300, 200, 650); await W(700)
-        print('pull down log ->', await pg.evaluate("state.views.today"))
+        print('pull down log ->', await pg.evaluate("state.views.today"), '| leftover snapshot:', await pg.evaluate("!!document.querySelector('.ghost')"))
         # 2. a short pull springs back
         await pg.evaluate("go('log',{logExId:'bp'})"); await W(700)
-        await drag(cdp, 200, 300, 200, 340, steps=6); await W(700)
-        print('short pull stays ->', await pg.evaluate("state.views.today"))
+        await drag(cdp, 200, 300, 200, 350, steps=20, hold=0.2); await W(800)   # slow, then held: not a flick
+        print('short pull stays ->', await pg.evaluate("state.views.today"), '| leftover snapshot:', await pg.evaluate("!!document.querySelector('.ghost')"))
         # 3. swipe left to the next exercise
-        await drag(cdp, 330, 420, 40, 425, steps=10); await W(800)
+        await drag(cdp, 330, 190, 40, 195, steps=10); await W(800)   # on the title (a swipe that starts on a set field is ignored)
         print('swipe to next exercise ->', await pg.evaluate("state.logExId"))
-        await drag(cdp, 40, 420, 330, 425, steps=10); await W(800)
+        await drag(cdp, 40, 190, 330, 195, steps=10); await W(800)
         print('swipe back ->', await pg.evaluate("state.logExId"))
         # 4. pull down a sheet closes it
         await pg.evaluate("go('day'); openSheet({type:'moveBack', k: dk(addDays(new Date(),1))})"); await W(700)

@@ -9,7 +9,7 @@ A workout tracker and planner PWA for **Lukas** (the owner), his girlfriend and 
 
 - Repo: `lukaslundmark1/Workout-Tracker`, branch `main`, every file at the root. Pushing to `main` deploys it.
 - Live site (GitHub Pages): https://lukaslundmark1.github.io/Workout-Tracker/
-- Current version: **v0.28** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
+- Current version: **v0.29** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
 - Firebase project `workout-tracker-705ae`, free Spark plan. Auth is Google + email/password; Firestore is in europe-north1. Lukas changes console settings himself. Tell him exactly what to click.
 
 ## How Lukas works (important)
@@ -67,7 +67,7 @@ A workout tracker and planner PWA for **Lukas** (the owner), his girlfriend and 
 - **Plan schedule:** it's cached by a fingerprint of what it reads (`schedSigNow`). If you make `planSchedule()` depend on something new, add that to the fingerprint.
 - **Outside data:** anything from friends, the shared database, received gifts or imported backups goes through the `clean*` sanitizers, and all text shown is passed through `esc()`. If you add an outside service, it must be allowed in the CSP.
 - **Editing app.js:** make targeted edits. Never do wide cut ranges or blind regex renames. One over-wide edit deleted helper functions and crashed the Plans tab (v0.21), and a rename once changed text in the UI.
-- **Look and feel:** keep the iOS look. Use the spring curve `cubic-bezier(.32,.72,0,1)`, glass floating controls, and respect reduced motion. Colours: blue = actions, red = destructive/today/badges, green = done/active, orange = personal records.
+- **Look and feel:** keep the iOS look. Movement uses the weighted springs `var(--ease-screen|sheet|soft)` with `var(--dur-…)` (see DECISIONS → Motion; app.js timeouts must match), nothing should change instantly, and actions get a `haptic(kind)` ('select', 'impact', 'success', 'warn', 'error'). Glass floating controls, and respect reduced motion. Colours: blue = actions, red = destructive/today/badges, green = done/active, orange = personal records.
 
 ## Testing
 Needs Python 3 with Playwright and Node (for `dev/scan.js`). The dev scripts use Chrome at `/usr/bin/google-chrome` if it's there, otherwise Playwright's own Chromium:

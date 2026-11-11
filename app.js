@@ -246,7 +246,9 @@ function render() {
   padAfterRender();
   document.body.classList.toggle('has-pdots', !!app.querySelector('.pdots'));
   pullSync();   // (a class instead of a :has() rule, which re-checks on every change)
-  state.justTicked = null;
+  // Content that was swapped in place (another segment, filter, week or month) eases in instead of popping
+  if (state.soft && !reduceMotion()) app.querySelectorAll(state.soft === true ? '.seg ~ *, .chips ~ *' : state.soft).forEach(el => { el.classList.remove('soft-in'); void el.offsetWidth; el.classList.add('soft-in'); });
+  state.justTicked = null; state.justUnticked = null; state.newRow = null; state.soft = null;
 }
 /* Redraws that come from the background (sync, sign-in, friends, the shared database) wait until nothing is moving:
    no finger on the screen, no scroll still gliding, no screen sliding in, number pad closed. Several in a row become one.
@@ -265,6 +267,8 @@ function flushBg() {
 }
 const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, summary: 1, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pWorkout: 3, fEx: 4, lib: 2 };
 const reduceMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+// How long the springy movements take (they match the --dur-* values in index.html; the springs themselves are defined there)
+const SCREEN_MS = 700, SHEET_OUT_MS = 520, SWIPE_MS = 430, PULL_MS = 560;
 // Snapshot of the current screen, used as the layer the new screen slides over (or that slides away)
 // Only what's on the glass is copied: parts of the screen below the bottom edge are left out (long lists), and the copy
 // is a window the size of the screen, scrolled to where you were. Much less to copy and to move while it animates.
@@ -312,7 +316,7 @@ function go(view, extra = {}) {
   void app.offsetWidth;
   app.classList.add(dir === 'up' ? 'enter-up' : 'under');
   g.classList.add(dir === 'up' ? 'recede' : 'leave-down');
-  setTimeout(() => { g.remove(); app.classList.remove('enter-up', 'under'); }, 520);
+  setTimeout(() => { g.remove(); app.classList.remove('enter-up', 'under'); }, SCREEN_MS);
 }
 
 /* ================= Polish: the small things =================
@@ -441,18 +445,35 @@ function animateSegs(root = app) {
     segPos[key] = r;
   });
 }
-// A light tap you can feel: vibration on Android; on iPhone (iOS 18+) toggling a hidden system switch gives a haptic tick
+/* Haptics, the way iPhone apps use them:
+   'select'  a light tick when a choice changes (tabs, segments, chips, switches, wheel rows, scrubbing a chart)
+   'impact'  a firmer tap for an action landing (ticking a set, a page turning, a dragged row moving, pulling past the close point)
+   'success' two taps (workout finished, personal record, sent)      'warn' two slower taps (about to delete something)
+   'error'   three quick taps (a set can't be ticked without numbers)
+   Android vibrates in matching patterns. On iPhone (iOS 18+) web apps can't vibrate, but toggling a hidden system switch gives
+   the system's own tick, so patterns are made of ticks. */
 const haptic = (() => {
-  let lbl = null;
-  return () => {
+  let lbl = null, last = 0;
+  const VIB = { select: 6, impact: 14, success: [12, 70, 18], warn: [22, 110, 22], error: [14, 50, 14, 50, 14] };
+  const TICKS = { select: [0], impact: [0], success: [0, 110], warn: [0, 160], error: [0, 70, 140] };
+  const tick = () => {
+    if (!lbl) { lbl = document.createElement('label'); lbl.setAttribute('aria-hidden', 'true'); lbl.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden';
+      const inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('switch', ''); inp.tabIndex = -1; lbl.appendChild(inp); document.body.appendChild(lbl); }
+    lbl.click();
+  };
+  return (kind = 'select') => {
     try {
-      if (navigator.vibrate) { navigator.vibrate(8); return; }
-      if (!lbl) { lbl = document.createElement('label'); lbl.setAttribute('aria-hidden', 'true'); lbl.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden';
-        const inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('switch', ''); inp.tabIndex = -1; lbl.appendChild(inp); document.body.appendChild(lbl); }
-      lbl.click();
+      const now = performance.now();
+      if (now - last < 40) return;            // two at once would feel like one mushy buzz
+      last = now;
+      if (navigator.vibrate) { navigator.vibrate(VIB[kind] || VIB.select); return; }
+      (TICKS[kind] || TICKS.select).forEach(t => t ? setTimeout(tick, t) : tick());
     } catch (e) {}
   };
 })();
+// Choices made anywhere get their tick without each screen having to ask: segmented controls, filter chips, switches
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('.seg button:not(.on), .np-seg button:not(.on), .chip, .pdot:not(.on), .week .day:not(.sel)')) haptic(); }, true);
+document.addEventListener('change', e => { if (e.target.classList && e.target.classList.contains('switch')) haptic(); }, true);
 let dockPos = null;
 function renderDock() {
   // Today stays in the middle
@@ -501,7 +522,7 @@ function initWheel(id, index) {
     raf = 0;
     if (!sc.isConnected) return;
     const i = Math.max(0, Math.min(opts.length - 1, Math.round(sc.scrollTop / ITEM))), mid = sc.scrollTop + sc.clientHeight / 2;
-    if (i !== lastI) { opts.forEach((o, j) => o.classList.toggle('on', i === j)); lastI = i; }
+    if (i !== lastI) { opts.forEach((o, j) => o.classList.toggle('on', i === j)); if (lastI >= 0) haptic(); lastI = i; }
     if (opts.length < 2) return;
     for (const o of opts) {
       const d = (o.offsetTop + ITEM / 2 - mid) / ITEM;
@@ -542,18 +563,20 @@ function makeSortable(list, onMove) {
       const y0 = e.clientY;
       let to = from;
       grip.setPointerCapture(e.pointerId);
+      haptic('impact');
       list.classList.add('sorting');
       row.classList.add('dragging');
       const move = ev => {
         const dy = Math.max(rects[0].top - rects[from].top - h * .6, Math.min(rects[rows.length - 1].top - rects[from].top + h * .6, ev.clientY - y0));
         row.style.transform = `translateY(${dy}px)`;
-        const center = rects[from].top + h / 2 + dy;
+        const center = rects[from].top + h / 2 + dy, was = to;
         to = from;
         rows.forEach((r, j) => {
           const mid = rects[j].top + rects[j].height / 2;
           if (j > from && center > mid) to = j;
           if (j < from && center < mid && to === from) to = j;
         });
+        if (to !== was) haptic();   // a tick each time the row passes another
         rows.forEach((r, j) => {
           if (j === from) return;
           const shift = (from < to && j > from && j <= to) ? -h : (to < from && j >= to && j < from) ? h : 0;
@@ -623,7 +646,7 @@ function doToday(k) {
   if (k > tk) delete data.days[k];          // moved, not copied
   if (isFinished(tk)) delete d.session.end;  // today was already finished: carry on
   state.selected = tk; state.weekStart = startOfWeek(new Date());
-  save();
+  save(); haptic('impact');
   go('day');
   toast(`<span class="tic" style="background:var(--tint-soft);color:var(--tint)">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 18, 2.2)}</span><span>${esc(name)} is on today</span>`);
 }
@@ -692,13 +715,14 @@ function renderDay() {
       <span class="pair glass"><button id="prevW" aria-label="Previous week">${ICON_PREV}</button><button id="nextW" aria-label="Next week">${ICON_NEXT}</button></span>
       <button class="circle glass" id="calBtn" aria-label="Calendar">${ICON_CAL}</button>
     </header>
-    <div class="week-wrap" id="weekWrap"><div class="week-track" id="weekTrack">${weekHTML(state.weekStart)}</div></div>
+    <div class="week-wrap" id="weekWrap"><div class="week-track ${state.weekSlide ? 'from-' + state.weekSlide : ''}" id="weekTrack">${weekHTML(state.weekStart)}</div></div>
     <div class="swipe-area day-swipe" id="daySwipe"><div class="pager" id="dayPager"><div class="slide-wrap ${state.daySlide ? 'from-' + state.daySlide : ''}">${dayBodyHTML(k)}</div></div></div>`;
-  state.daySlide = null;
+  state.daySlide = null; state.weekSlide = null;
 
-  const shift = n => { state.weekStart = addDays(state.weekStart, 7 * n); render(); };
-  $('prevW').onclick = () => shift(-1);
-  $('nextW').onclick = () => shift(1);
+  // The arrow buttons slide the new week in from the side it comes from (a swipe has already moved it there)
+  const shift = (n, slide) => { state.weekStart = addDays(state.weekStart, 7 * n); if (slide) { state.weekSlide = n > 0 ? 'right' : 'left'; haptic(); } render(); };
+  $('prevW').onclick = () => shift(-1, true);
+  $('nextW').onclick = () => shift(1, true);
   const pickDay = k2 => { if (k2 === state.selected) return; state.daySlide = k2 > state.selected ? 'right' : 'left'; state.selected = k2; state.pending = null; render(); };
   if ($('today')) $('today').onclick = () => { state.weekStart = startOfWeek(new Date()); if (tk !== state.selected) pickDay(tk); else render(); };
   $('calBtn').onclick = () => { const d = parse(state.selected); go('calendar', { calMonth: new Date(d.getFullYear(), d.getMonth(), 1) }); };
@@ -715,14 +739,17 @@ function renderDay() {
   app.querySelectorAll('[data-trash]').forEach(b => b.onclick = () => {
     const exId = b.dataset.trash, k = state.selected;
     const hasSets = setsFor(exId, k).length > 0;
-    if (hasSets && state.pending !== 'trash:' + exId) { state.pending = 'trash:' + exId; return render(); }
-    const d = ensureDay(k);
-    d.items = d.items.filter(i => i.exId !== exId);
-    data.sets = data.sets.filter(x => !(x.exId === exId && x.date === k));
-    delete state.drafts[exId + '|' + k];
-    if (rest && rest.date === k && rest.exId === exId) stopRest();
-    if (!d.items.length) clearEmptyDay(k, true);
-    save(); state.pending = null; render();
+    if (hasSets && state.pending !== 'trash:' + exId) { haptic('warn'); state.pending = 'trash:' + exId; return render(); }
+    haptic('impact');
+    collapseOut(b.closest('.cell-wrap'), () => {
+      const d = ensureDay(k);
+      d.items = d.items.filter(i => i.exId !== exId);
+      data.sets = data.sets.filter(x => !(x.exId === exId && x.date === k));
+      delete state.drafts[exId + '|' + k];
+      if (rest && rest.date === k && rest.exId === exId) stopRest();
+      if (!d.items.length) clearEmptyDay(k, true);
+      save(); state.pending = null; render();
+    });
   });
   if ($('dayList')) makeSortable($('dayList'), (from, to) => {
     const items = ensureDay(state.selected).items;
@@ -776,7 +803,7 @@ function logBodyHTML(m) {
     const s = bySlot[i];
     const v = s ? { w: W(s.weight), r: String(s.reps) } : suggest(m, i);
     const just = s && state.justTicked === s.id;
-    rows += `<div class="setrow ${s ? 'done' : ''} ${just ? 'just' : ''}" data-i="${i}">
+    rows += `<div class="setrow ${s ? 'done' : ''} ${just ? 'just' : ''} ${state.newRow === i ? 'new' : ''} ${!s && state.justUnticked === i ? 'unjust' : ''}" data-i="${i}">
       <span class="sn">${i + 1}${s && pr && pr.set.id === s.id ? '<span class="pr-mini">PR</span>' : ''}</span>
       <input class="w" readonly inputmode="none" tabindex="-1" autocomplete="off" aria-label="Set ${i + 1} weight in ${U()}" value="${esc(v.w)}" placeholder="${U()}">
       <input class="r" readonly inputmode="none" tabindex="-1" autocomplete="off" aria-label="Set ${i + 1} reps" value="${esc(v.r)}" placeholder="reps">
@@ -865,8 +892,12 @@ function renderLog() {
   if ($('addMore')) $('addMore').onclick = () => go('picker', { pickerQuery: '', pickerMode: 'exercises', anim: 'up' });
   $('history').onclick = () => go('history', { stat: 'e1rm' });
   $('noteBtn').onclick = () => openSheet({ type: 'note', exId: ex.id });
-  $('plus').onclick = () => { item.sets = n + 1; changed(); };
-  $('minus').onclick = () => { if (!(n > 0 && !bySlot[n - 1])) return; item.sets = n - 1; delete drafts[n - 1]; changed(); };
+  $('plus').onclick = () => { haptic(); item.sets = n + 1; state.newRow = n; changed(); };   // the new row grows in
+  $('minus').onclick = () => {
+    if (!(n > 0 && !bySlot[n - 1])) return;
+    haptic();
+    collapseOut(app.querySelector(`#pager .setrow[data-i="${n - 1}"]`), () => { item.sets = n - 1; delete drafts[n - 1]; changed(); });   // the last row folds away first
+  };
 
   app.querySelectorAll('#pager .setrow').forEach(row => {
     const i = Number(row.dataset.i);
@@ -890,15 +921,17 @@ function renderLog() {
     row.querySelector('.check').onclick = () => {
       if (np) { padCommit(); if (np.i === i) { np.fresh = true; if (!done) { const nx = i + 1; np = nx < n ? { ...np, i: nx, field: 'w' } : null; if (!np) padClose(); } } }
       if (done) {
+        haptic();
         drafts[i] = { w: W(done.weight), r: String(done.reps) };
         data.sets = data.sets.filter(s => s.id !== done.id);
+        state.justUnticked = i;
         changed(); return;
       }
       const w = parseW(wIn.value), r = parseR(rIn.value);
       if (isNaN(w)) wIn.classList.add('bad');
       if (isNaN(r)) rIn.classList.add('bad');
-      if (isNaN(w) || isNaN(r)) return;
-      haptic();
+      if (isNaN(w) || isNaN(r)) return haptic('error');
+      haptic('impact');
       const prBefore = prFor(ex.id, k);
       const newSet = { id: uid(), exId: ex.id, date: k, slot: i, weight: fromU(w), reps: r, ts: Date.now() };
       data.sets.push(newSet);
@@ -909,10 +942,12 @@ function renderLog() {
       if (!d.session && k === todayKey()) d.session = { start: Date.now() }; // first set logged today starts the timer
       const prNow = prFor(ex.id, k);
       const newPR = prNow && prNow.set.id === newSet.id && (!prBefore || prBefore.set.id !== newSet.id);
+      if (newPR) setTimeout(() => haptic('success'), 140);
       if (newPR) toast(`<span class="tic">${ICON_TROPHY}</span><span>New personal record<small>${esc(ex.name)} · est. 1RM ${fmtStat(toU(prNow.now), 'e1rm')} ${U()}</small></span>`);
       if (k === todayKey() && !isFinished(k)) {
         const total = Math.max(item.sets || 0, n), doneNow = setsFor(ex.id, k).length;
         if (total >= 2 && doneNow < total) startRest(ex.id); else stopRest();   // last set of this exercise: off
+        if (setsLeft(k) === 0 && !newPR) setTimeout(() => haptic('success'), 140);
         if (setsLeft(k) === 0 && !newPR) toast(`<span class="tic" style="background:var(--green-soft);color:var(--green)">${ICON_OK}</span><span>All planned sets done<small>Finish the workout when you're ready</small></span>`);
       }
       changed();
@@ -1058,6 +1093,19 @@ function prFor(exId, k, src = data.sets) {
 }
 const ICON_TROPHY = svg('<path d="M8 4h8v5a4 4 0 0 1-8 0V4z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7M10 17h4v3h-4z"/>', 18, 2);
 
+/* ================= Rows leaving =================
+   A removed row folds shut (height, fade, a slight shrink) before the screen is redrawn without it, instead of vanishing. */
+let collapsing = false;
+function collapseOut(el, done) {
+  if (collapsing) return;
+  if (!el || reduceMotion()) return done();
+  collapsing = true;
+  el.style.height = el.offsetHeight + 'px'; el.style.overflow = 'hidden';
+  void el.offsetHeight;
+  el.classList.add('collapsing'); el.style.height = '0px';
+  setTimeout(() => { collapsing = false; done(); }, 300);
+}
+
 /* ================= Toast ================= */
 function toast(html) {
   let t = $('toast');
@@ -1144,7 +1192,7 @@ function renderSummary() {
 // Let go past ~30% of the width, or flick, to turn the page; otherwise it springs back.
 function swipePager(surface, target, opts) {
   let s = null;
-  const ease = 'transform .36s cubic-bezier(.32,.72,0,1)';
+  const ease = 'transform .5s var(--ease-soft)';
   const clearPeek = () => { if (s && s.peek) { s.peek.remove(); s.peek = null; } };
   // The neighbouring pages are built ahead of time, once the screen has settled, so a swipe starts moving on its
   // very first frame (building a page takes a few milliseconds, which would otherwise land right as your finger moves)
@@ -1206,10 +1254,11 @@ function swipePager(surface, target, opts) {
     target.style.transition = ease;
     if (st.peek && (Math.abs(st.dx) > w * 0.3 || flick)) {
       target.style.transform = `translateX(${-st.dir * (w + 16)}px)`;
-      setTimeout(() => opts.commit(st.dir), 330);
+      haptic();
+      setTimeout(() => opts.commit(st.dir), SWIPE_MS);
     } else {
       target.style.transform = '';
-      setTimeout(() => { if (st.peek && !(s && s.peek === st.peek)) st.peek.remove(); }, 360);
+      setTimeout(() => { if (st.peek && !(s && s.peek === st.peek)) st.peek.remove(); }, 520);
     }
   };
   surface.addEventListener('touchend', end);
@@ -1239,7 +1288,7 @@ function wireTimer(k) {
   $('timer').onclick = () => {
     const day = ensureDay(k);
     const s = day.session;
-    if (!s) { day.session = { start: Date.now() }; save(); return render(); }
+    if (!s) { haptic('impact'); day.session = { start: Date.now() }; save(); return render(); }
     if (s.end) return openSheet({ type: 'duration', k });
     openFinish(k);
   };
@@ -1326,7 +1375,8 @@ function sheetDuration(el) {
     else { const end = editing ? s.end : endAt; d.session = { start: end - total, end }; }
     save();
     state.sheet = null;
-    if (editing) return render();
+    if (editing) { haptic(); return render(); }
+    haptic('success');
     stopRest();
     if (hasSets(k)) go('summary', { sumDate: k }); else go('day');
   };
@@ -1343,7 +1393,7 @@ function renderPicker() {
     ${mode === 'exercises' ? searchHTML('q', 'Search exercises') : ''}
     <div id="results"></div>`;
   $('back').onclick = () => go('day');
-  app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { if (state.pickerMode !== b.dataset.m) haptic(); state.pickerMode = b.dataset.m; render(); });
+  app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { if (state.pickerMode !== b.dataset.m) state.soft = true; state.pickerMode = b.dataset.m; render(); });
   const results = $('results');
   const inDay = dayOf(state.selected).items.map(i => i.exId);
 
@@ -1410,11 +1460,12 @@ function renderCalendar() {
     <div class="large-title">${monthName(m)} <span style="color:var(--label2);font-weight:600">${m.getFullYear()}</span></div>
     <div class="cal-card">
       <div class="cal-head">${wd().map(w => `<div>${w}</div>`).join('')}</div>
-      <div class="cal">${cells.join('')}</div>
+      <div class="cal ${state.calSlide ? 'from-' + state.calSlide : ''}">${cells.join('')}</div>
     </div>`;
+  state.calSlide = null;
   $('back').onclick = () => go('day');
-  $('prevM').onclick = () => { state.calMonth = new Date(m.getFullYear(), m.getMonth() - 1, 1); render(); };
-  $('nextM').onclick = () => { state.calMonth = new Date(m.getFullYear(), m.getMonth() + 1, 1); render(); };
+  $('prevM').onclick = () => { haptic(); state.calMonth = new Date(m.getFullYear(), m.getMonth() - 1, 1); state.calSlide = 'left'; render(); };
+  $('nextM').onclick = () => { haptic(); state.calMonth = new Date(m.getFullYear(), m.getMonth() + 1, 1); state.calSlide = 'right'; render(); };
   app.querySelectorAll('.cal [data-k]').forEach(b => b.onclick = () => go('day', { selected: b.dataset.k, weekStart: startOfWeek(parse(b.dataset.k)) }));
 }
 
@@ -1794,7 +1845,7 @@ function pinToday() {
   data.days[tk] = { items: nx.workout.items.filter(i => exById(i.exId)).map(i => ({ exId: i.exId, sets: i.sets })),
                     workouts: [{ id: nx.workout.id, name: nx.workout.name }], plan: { id: sc.plan.id, index: nx.index }, pinned: true };
   state.selected = tk; state.weekStart = startOfWeek(new Date());
-  save();
+  save(); haptic('impact');
   go('day');
   toast(`<span class="tic" style="background:var(--tint-soft);color:var(--tint)">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.4)}</span><span>${esc(nx.workout.name)} is on today<small>The rest of your plan stays the same</small></span>`);
 }
@@ -1834,8 +1885,8 @@ function sheetMoveBack(el) {
       <span class="pv-row">${o.days.map(chip).join('')}</span></span></button>`).join('')}
     <button class="primary" id="sGo">Move</button>`);
   $('sCancel').onclick = () => closeSheet();
-  el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { s.pick = b.dataset.pick; renderSheet(); });
-  $('sGo').onclick = () => { const pick = s.pick; closeSheet(); moveBack(k, pick || undefined); render(); };
+  el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { if (s.pick !== b.dataset.pick) haptic(); s.pick = b.dataset.pick; renderSheet(); });
+  $('sGo').onclick = () => { const pick = s.pick; haptic('impact'); closeSheet(); moveBack(k, pick || undefined); render(); };
 }
 
 function renderPlanList() {
@@ -1888,7 +1939,7 @@ function renderPlanView() {
   $('sendP').onclick = () => openSheet({ type: 'sendTo', kind: 'plan', id: p.id });
   app.querySelectorAll('[data-goday]').forEach(b => b.onclick = () => { const k = b.dataset.goday; state.tab = 'today'; state.views.today = 'day'; state.selected = k; state.weekStart = startOfWeek(parse(k)); render(); window.scrollTo(0, 0); });
   if ($('endP')) $('endP').onclick = () => {
-    if (state.pending !== 'endP') { state.pending = 'endP'; return render(); }
+    if (state.pending !== 'endP') { haptic('warn'); state.pending = 'endP'; return render(); }
     // Keep days already filled in; future planned days disappear
     for (const k in data.days) if (k >= tk && (data.days[k].plan || data.days[k].rest) && !hasSets(k) && !data.days[k].session) delete data.days[k];
     data.activePlan = null; save(); state.pending = null; render();
@@ -1927,10 +1978,10 @@ function renderPlanEdit() {
   $('addDay').onclick = () => openSheet({ type: 'planDay', index: dr.days.length, isNew: true });
   $('addRest').onclick = () => { dr.days.push({ workoutId: null }); render(); };
   app.querySelectorAll('[data-day]').forEach(b => b.onclick = () => openSheet({ type: 'planDay', index: Number(b.dataset.day) }));
-  app.querySelectorAll('[data-rmday]').forEach(b => b.onclick = () => { dr.days.splice(Number(b.dataset.rmday), 1); render(); });
+  app.querySelectorAll('[data-rmday]').forEach(b => b.onclick = () => { haptic('impact'); collapseOut(b.closest('.cell-wrap'), () => { dr.days.splice(Number(b.dataset.rmday), 1); render(); }); });
   makeSortable($('dayRows'), (from, to) => { dr.days.splice(to, 0, dr.days.splice(from, 1)[0]); render(); });
-  $('wkMinus').onclick = () => { dr.weeks = Math.max(0, (dr.weeks || 0) - 1); render(); };
-  $('wkPlus').onclick = () => { dr.weeks = Math.min(52, (dr.weeks || 0) + 1); render(); };
+  $('wkMinus').onclick = () => { haptic(); dr.weeks = Math.max(0, (dr.weeks || 0) - 1); render(); };
+  $('wkPlus').onclick = () => { haptic(); dr.weeks = Math.min(52, (dr.weeks || 0) + 1); render(); };
   $('saveP').onclick = () => {
     const nm = dr.name.trim();
     if (!nm) { $('pErr').textContent = 'Give the plan a name.'; name.focus(); return; }
@@ -1941,7 +1992,7 @@ function renderPlanEdit() {
     save(); go('pView', { pdraft: null, planId: id });
   };
   if ($('delP')) $('delP').onclick = () => {
-    if (state.pending !== 'delP') { state.pending = 'delP'; return render(); }
+    if (state.pending !== 'delP') { haptic('warn'); state.pending = 'delP'; return render(); }
     if (data.activePlan && data.activePlan.planId === dr.id) data.activePlan = null;
     data.plans = data.plans.filter(p => p.id !== dr.id);
     save(); go('wList', { pdraft: null });
@@ -1988,7 +2039,7 @@ function sheetPlanStart(el) {
     const first = s.date, startIdx = wheelIndex('wDay');
     for (const k in data.days) if (k >= todayKey() && (data.days[k].plan || data.days[k].rest) && !hasSets(k) && !data.days[k].session) delete data.days[k];
     data.activePlan = { planId: p.id, begin: first, start: dk(addDays(parse(first), -startIdx)) };
-    save(); state.sheet = null;
+    haptic('success'); save(); state.sheet = null;
     render();
   };
 }
@@ -2003,7 +2054,7 @@ function renderWorkoutList() {
     <div class="seg"><button data-wseg="plans" class="${seg === 'plans' ? 'on' : ''}">Plans</button><button data-wseg="workouts" class="${seg === 'workouts' ? 'on' : ''}">Workouts</button></div>`;
   if (seg === 'plans') {
     app.innerHTML = head + renderPlanList();
-    app.querySelectorAll('[data-wseg]').forEach(b => b.onclick = () => { state.wSeg = b.dataset.wseg; render(); });
+    app.querySelectorAll('[data-wseg]').forEach(b => b.onclick = () => { if (state.wSeg !== b.dataset.wseg) state.soft = true; state.wSeg = b.dataset.wseg; render(); });
     $('newP').onclick = () => go('pEdit', { pdraft: { id: null, name: '', weeks: 8, days: [] } });
     app.querySelectorAll('[data-plan]').forEach(b => b.onclick = () => go('pView', { planId: b.dataset.plan }));
     return;
@@ -2014,7 +2065,7 @@ function renderWorkoutList() {
     <button class="btn-tinted" id="newW">${ICON_PLUS} Create a new workout</button>`;
   const create = () => go('wEdit', { draft: { id: null, name: '', items: [] } });
   $('newW').onclick = create;
-  app.querySelectorAll('[data-wseg]').forEach(b => b.onclick = () => { state.wSeg = b.dataset.wseg; render(); });
+  app.querySelectorAll('[data-wseg]').forEach(b => b.onclick = () => { if ((state.wSeg || 'plans') !== b.dataset.wseg) state.soft = true; state.wSeg = b.dataset.wseg; render(); });
   app.querySelectorAll('[data-id]').forEach(b => b.onclick = () => {
     const w = woById(b.dataset.id);
     go('wEdit', { draft: { id: w.id, name: w.name, items: w.items.map(i => ({ ...i })) } });
@@ -2049,7 +2100,7 @@ function renderWorkoutEdit() {
   $('addToW').onclick = () => openSheet({ type: 'addToWorkout', step: 'pick', q: '' });
   if ($('sendW')) $('sendW').onclick = () => openSheet({ type: 'sendTo', kind: 'workout', id: dr.id, draft: { name: dr.name.trim() || 'Workout', items: dr.items.map(i => ({ ...i })) } });
   app.querySelectorAll('[data-sets]').forEach(b => b.onclick = () => openSheet({ type: 'setCount', index: Number(b.dataset.sets) }));
-  app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { dr.items.splice(Number(b.dataset.rm), 1); render(); });
+  app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { haptic('impact'); collapseOut(b.closest('.cell-wrap'), () => { dr.items.splice(Number(b.dataset.rm), 1); render(); }); });
   makeSortable($('wList'), (from, to) => { dr.items.splice(to, 0, dr.items.splice(from, 1)[0]); render(); });
   $('saveW').onclick = () => {
     const nm = dr.name.trim();
@@ -2059,7 +2110,7 @@ function renderWorkoutEdit() {
     save(); go('wList', { draft: null });
   };
   if ($('delW')) $('delW').onclick = () => {
-    if (state.pending !== 'delW') { state.pending = 'delW'; return render(); }
+    if (state.pending !== 'delW') { haptic('warn'); state.pending = 'delW'; return render(); }
     data.workouts = data.workouts.filter(w => w.id !== dr.id);
     save(); go('wList', { draft: null });
   };
@@ -2365,7 +2416,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.28';
+const APP_VERSION = '0.29';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2442,15 +2493,14 @@ function renderSettings() {
     const key = g.dataset.set;
     const v = key === 'weekStart' ? Number(b.dataset.v) : b.dataset.v;
     if (st[key] === v) return;
-    haptic();
     st[key] = v;
     if (key === 'units') state.drafts = {};            // typed-but-unsaved numbers were in the old unit
     if (key === 'theme') applyTheme();
     if (key === 'weekStart') state.weekStart = startOfWeek(parse(state.selected));
     save(); state.pending = null; render();
   }));
-  $('dsMinus').onclick = () => { st.defaultSets = Math.max(1, st.defaultSets - 1); save(); render(); };
-  $('dsPlus').onclick = () => { st.defaultSets = Math.min(10, st.defaultSets + 1); save(); render(); };
+  $('dsMinus').onclick = () => { haptic(); st.defaultSets = Math.max(1, st.defaultSets - 1); save(); render(); };
+  $('dsPlus').onclick = () => { haptic(); st.defaultSets = Math.min(10, st.defaultSets + 1); save(); render(); };
 
   $('export').onclick = () => exportBackup();
   $('import').onclick = () => $('importFile').click();
@@ -2463,7 +2513,7 @@ function renderSettings() {
       try {
         const d = JSON.parse(r.result);
         if (!d || !Array.isArray(d.exercises) || !Array.isArray(d.sets)) throw new Error('bad');
-        state.importData = d; state.pending = 'import'; render();
+        state.importData = d; state.pending = 'import'; haptic('warn'); render();
       } catch (err) { $('setErr').textContent = "That file isn't a Training backup."; }
     };
     r.readAsText(f);
@@ -2473,7 +2523,7 @@ function renderSettings() {
     save(); applyTheme(); state.pending = null; render();
   };
   $('erase').onclick = () => {
-    if (state.pending !== 'erase') { state.pending = 'erase'; return render(); }
+    if (state.pending !== 'erase') { haptic('warn'); state.pending = 'erase'; return render(); }
     data = migrate({ exercises: [], days: {}, sets: [], workouts: [], settings: data.settings });
     state.drafts = {}; save(); state.pending = null; render();
   };
@@ -2694,7 +2744,7 @@ function renderFriend() {
   $('back').onclick = () => go('friends');
   $('shareSw').onchange = e => setShare(l, e.target.checked).catch(err => { friends.error = err.code || err.message; });
   $('unfriend').onclick = () => {
-    if (state.pending !== 'unfriend') { state.pending = 'unfriend'; return render(); }
+    if (state.pending !== 'unfriend') { haptic('warn'); state.pending = 'unfriend'; return render(); }
     state.pending = null; removeLink(l).then(() => go('friends'));
   };
   if ($('fRefresh')) $('fRefresh').onclick = () => { delete friends.cache[o]; render(); };
@@ -2811,7 +2861,7 @@ async function sendGift(kind, item, links) {
   await Promise.all(sends);
 }
 const whenSent = u => { const r = relDay(dk(new Date(u || Date.now()))); return r === 'Today' || r === 'Yesterday' ? r.toLowerCase() : `on ${r}`; };
-const sentToast = (name, links) => toast(`<span class="tic" style="background:var(--green-soft);color:var(--green)">${ICON_OK}</span><span>Sent ${esc(name)}<small>To ${links.map(l => esc(nameOf(l))).join(', ')}</small></span>`);
+const sentToast = (name, links) => haptic('success') || toast(`<span class="tic" style="background:var(--green-soft);color:var(--green)">${ICON_OK}</span><span>Sent ${esc(name)}<small>To ${links.map(l => esc(nameOf(l))).join(', ')}</small></span>`);
 const sendErrText = e => isPerm(e) ? 'Sending needs the new Firebase rules. Open Firestore → Rules, paste the rules from Claude and click Publish.' : `Couldn't send (${esc(e.code || e.message)}).`;
 
 function acceptGift(g) {
@@ -2922,7 +2972,7 @@ function sheetGift(el) {
     <button class="primary" id="gAdd">${g.kind === 'plan' ? 'Add plan' : 'Add to my workouts'}</button>
     <button class="btn-tinted" id="gDecline" style="color:var(--red);background:var(--red-soft)">Decline</button>`);
   $('sCancel').onclick = () => closeSheet();
-  $('gAdd').onclick = () => { haptic(); acceptGift(g); };
+  $('gAdd').onclick = () => { haptic('success'); acceptGift(g); };
   $('gDecline').onclick = () => declineGift(g);
 }
 
@@ -3101,7 +3151,7 @@ function sheetDeleteAccount(el) {
   if ($('daPass')) { $('daPass').value = s.pass || ''; $('daPass').oninput = e => { s.pass = e.target.value; }; }
   $('daGo').onclick = async () => {
     if (!google && !(s.pass || '').length) { s.err = 'Enter your password.'; return renderSheet(); }
-    if (!s.armed) { s.armed = true; s.err = ''; return renderSheet(); }
+    if (!s.armed) { haptic('warn'); s.armed = true; s.err = ''; return renderSheet(); }
     s.err = '';
     try { await deleteAccount(s.pass, msg => { s.busy = msg; if (state.sheet === s) renderSheet(); }); }
     catch (e) {
@@ -3319,7 +3369,7 @@ function wireLibRows(root, mode, after) {
   root.querySelectorAll('[data-libdel]').forEach(b => b.onclick = ev => {
     ev.stopPropagation();
     const x = libById(b.dataset.libdel); if (!x) return;
-    if (state.pending !== 'libdel:' + x.id) { state.pending = 'libdel:' + x.id; return after(); }
+    if (state.pending !== 'libdel:' + x.id) { haptic('warn'); state.pending = 'libdel:' + x.id; return after(); }
     state.pending = null; removeFromLib(x); after();
   });
   root.querySelectorAll('[data-lib]').forEach(b => b.onclick = () => {
@@ -3357,8 +3407,8 @@ function renderLibrary() {
   };
   q.oninput = draw;
   draw();
-  app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { f.muscle = f.muscle === b.dataset.m ? '' : b.dataset.m; render(); });
-  app.querySelectorAll('[data-e]').forEach(b => b.onclick = () => { f.equip = f.equip === b.dataset.e ? '' : b.dataset.e; render(); });
+  app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { f.muscle = f.muscle === b.dataset.m ? '' : b.dataset.m; state.soft = '#libRes'; render(); });
+  app.querySelectorAll('[data-e]').forEach(b => b.onclick = () => { f.equip = f.equip === b.dataset.e ? '' : b.dataset.e; state.soft = '#libRes'; render(); });
   $('back').onclick = () => { state.libEdit = false; go(backOf('lib')); };
   if ($('libEdit')) $('libEdit').onclick = () => { state.libEdit = !state.libEdit; state.pending = null; render(); };
   $('libNew').onclick = () => openSheet({ type: 'exForm', exId: null, name: f.q.trim(), muscle: f.muscle, equip: f.equip,
@@ -3429,7 +3479,7 @@ function sheetAddFriend(el) {
   $('fGo').onclick = async () => {
     if (!s.found) return find();
     $('fGo').disabled = true;
-    try { await sendFriendRequest(s.found.uid, s.found.name, s.share); closeSheet(); render(); }
+    try { await sendFriendRequest(s.found.uid, s.found.name, s.share); haptic('success'); closeSheet(); render(); }
     catch (e) { s.err = isPerm(e) ? 'Friends needs the new Firebase rules first.' : (e.message || e.code); renderSheet(); }
   };
   if (s.auto) { s.auto = false; find(); }
@@ -3449,7 +3499,7 @@ function sheetAcceptFriend(el) {
     <button class="primary" id="aOk">Accept</button>`);
   $('aShare').onchange = e => { s.share = e.target.checked; };
   $('sCancel').onclick = () => closeSheet();
-  $('aOk').onclick = async () => { $('aOk').disabled = true; try { await acceptFriend(l, s.share); closeSheet(); render(); } catch (e) { s.err = isPerm(e) ? 'Friends needs the new Firebase rules first.' : (e.code || e.message); renderSheet(); } };
+  $('aOk').onclick = async () => { $('aOk').disabled = true; try { await acceptFriend(l, s.share); haptic('success'); closeSheet(); render(); } catch (e) { s.err = isPerm(e) ? 'Friends needs the new Firebase rules first.' : (e.code || e.message); renderSheet(); } };
 }
 
 /* ================= Swipe down to close ================= */
@@ -3460,9 +3510,10 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
                     pWorkouts: 1, pWorkout: 1, fEx: 1, lib: 1 };   // 1 = depends on where you came from (backOf)
 (function pullToClose() {
   let p = null;
-  const ease = '.4s cubic-bezier(.32,.72,0,1)';
+  const ease = '.6s var(--ease-sheet)';
   document.addEventListener('touchstart', e => {
-    p = null;
+    if (p && p.axis === 'down') return;   // a second finger mid-pull doesn't restart it
+    unhook(p); p = null;
     if (e.touches.length > 1) return;
     const t = e.target, touch = e.touches[0];
     if (t.closest('input, textarea, .wheel, .grip, .chart, #dock, .pdots, .ghost')) return;
@@ -3471,12 +3522,20 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
     if (sheetEl) { if (sheetEl.scrollTop <= 0) p = { ...base, kind: 'sheet', el: sheetEl }; return; }
     if (state.sheet || !backOf(state.views[state.tab]) || window.scrollY > 0) return;
     p = { ...base, kind: 'screen' };
+    // The screen under your finger is swapped out as the pull starts. Touch events keep going to the element the finger
+    // first touched, and once it's gone from the page they no longer reach the document, so the rest of the pull (and
+    // letting go) would be lost. Listening on that element too keeps the gesture whole.
+    p.tgt = t;
+    t.addEventListener('touchmove', move, { passive: false });
+    t.addEventListener('touchend', end); t.addEventListener('touchcancel', end);
   }, { passive: true });
+  const unhook = q => { if (q && q.tgt) { q.tgt.removeEventListener('touchmove', move, { passive: false }); q.tgt.removeEventListener('touchend', end); q.tgt.removeEventListener('touchcancel', end); q.tgt = null; } };
 
   // This handler can cancel scrolling, so while it's attached iOS waits for it on every finger move. It's only attached
   // where pulling down can close something (deeper screens, open sheets); on the main tabs scrolling never waits for it.
-  const move = e => {
-    if (!p) return;
+  function move(e) {
+    if (!p || e._pull) return;
+    e._pull = true;   // the same event can reach both the touched element and the document: handle it once
     const t = e.touches[0];
     const dx = t.clientX - p.x, dy = t.clientY - p.y;
     if (!p.axis) {
@@ -3489,11 +3548,14 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
     const now = performance.now();
     p.v = (t.clientY - p.ly) / Math.max(1, now - p.lt); p.ly = t.clientY; p.lt = now;
     p.dy = Math.max(0, dy);
+    // A tick as you pull past the point where letting go closes it (and again if you pull back above it)
+    const past = p.dy > 110;
+    if (past !== !!p.past) { p.past = past; haptic(past ? 'impact' : 'select'); }
     p.layer.style.transform = `translateY(${p.dy}px)`;
     const k = Math.min(1, p.dy / window.innerHeight);
     if (p.kind === 'screen') { app.style.transform = `scale(${.94 + .06 * k})`; app.style.opacity = .5 + .5 * k; }
     else if (p.backdrop) p.backdrop.style.opacity = 1 - k * 1.5;
-  };
+  }
   let attached = false;
   pullSync = () => {
     const need = !!state.sheet || !!backOf(state.views[state.tab]);
@@ -3520,15 +3582,19 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
     app.style.transform = 'scale(.94)'; app.style.opacity = '.5';
   }
 
-  const end = () => {
+  function end(e) {
+    if (e && e._pull) return;
+    if (e) e._pull = true;
+    unhook(p);
     if (!p || p.axis !== 'down') { p = null; pullSync(); return; }
     const q = p; p = null;
-    setTimeout(pullSync, 400);
-    const close = q.dy > 110 || (q.v > 0.5 && q.dy > 40);
+    setTimeout(pullSync, PULL_MS + 40);
+    const flung = q.v > 0.5 && performance.now() - q.lt < 100;   // a finger that stopped before lifting isn't a flick
+    const close = q.dy > 110 || (flung && q.dy > 40);
     q.layer.style.transition = `transform ${ease}`;
     if (q.kind === 'sheet') {
       if (q.backdrop) q.backdrop.style.transition = `opacity ${ease}`;
-      if (close) { q.layer.style.transform = 'translateY(110%)'; if (q.backdrop) q.backdrop.style.opacity = 0; setTimeout(closeSheet, 300); }
+      if (close) { q.layer.style.transform = 'translateY(110%)'; if (q.backdrop) q.backdrop.style.opacity = 0; setTimeout(closeSheet, 440); }
       else { q.layer.style.transform = ''; if (q.backdrop) q.backdrop.style.opacity = ''; }
       return;
     }
@@ -3536,7 +3602,7 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
     if (close) {
       q.layer.style.transform = 'translateY(100vh)';
       app.style.transform = ''; app.style.opacity = '';
-      setTimeout(() => { q.layer.remove(); app.style.transition = app.style.transformOrigin = ''; }, 330);
+      setTimeout(() => { q.layer.remove(); app.style.transition = app.style.transformOrigin = ''; }, PULL_MS);
     } else {
       q.layer.style.transform = 'translateY(0)';
       app.style.transform = 'scale(.94)'; app.style.opacity = '.5';
@@ -3546,7 +3612,7 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
         app.style.transition = app.style.transform = app.style.opacity = app.style.transformOrigin = '';
         render();
         q.layer.remove();
-      }, 330);
+      }, PULL_MS);
     }
   };
   document.addEventListener('touchend', end);
@@ -3569,7 +3635,7 @@ function renderSheet() {
       document.body.appendChild(g);
       const gs = g.querySelector('.sheet'); if (gs) gs.scrollTop = top;
       g.querySelectorAll('.wheel-scroll').forEach((w, i) => { w.scrollTop = wheels[i]; });
-      setTimeout(() => g.remove(), 380);
+      setTimeout(() => g.remove(), SHEET_OUT_MS);
     }
     el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); pullSync(); return;
   }
@@ -3669,7 +3735,7 @@ function sheetExForm(el) {
     if (after) after(id); else render();
   };
   if ($('sDel')) $('sDel').onclick = () => {
-    if (state.pending !== 'delEx') { state.pending = 'delEx'; return renderSheet(); }
+    if (state.pending !== 'delEx') { haptic('warn'); state.pending = 'delEx'; return renderSheet(); }
     data.exercises = data.exercises.filter(e => e.id !== ex.id);
     data.sets = data.sets.filter(x => x.exId !== ex.id);
     data.workouts.forEach(w => { w.items = w.items.filter(i => i.exId !== ex.id); });
