@@ -155,6 +155,7 @@ function render() {
   renderDock();
   renderSheet();
   animateSegs();
+  polish();
   state.justTicked = null;
 }
 const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, summary: 1, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pWorkout: 3, fEx: 4, lib: 2 };
@@ -175,11 +176,16 @@ function go(view, extra = {}) {
   const dir = extra.anim || (DEPTH[view] > DEPTH[from] ? 'up' : DEPTH[view] < DEPTH[from] ? 'down' : null);
   delete extra.anim;
   const g = dir && !reduceMotion() ? ghost(dir === 'down') : null;
+  if (dir === 'up') scrollMemo[state.tab + ':' + from] = window.scrollY;
   Object.assign(state, extra);
   state.views[state.tab] = view;
   state.pending = null;
   render();
-  window.scrollTo(0, 0);
+  // Going back returns you to where you were in the list; going deeper starts at the top
+  const backTo = dir === 'down' ? scrollMemo[state.tab + ':' + view] || 0 : 0;
+  delete scrollMemo[state.tab + ':' + view];
+  window.scrollTo(0, backTo);
+  syncTopbar();
   if (!g) return;
   document.querySelectorAll('.ghost').forEach(x => { if (x !== g) x.remove(); });
   app.classList.remove('enter-up', 'under');
@@ -188,6 +194,99 @@ function go(view, extra = {}) {
   g.classList.add(dir === 'up' ? 'recede' : 'leave-down');
   setTimeout(() => { g.remove(); app.classList.remove('enter-up', 'under'); }, 520);
 }
+
+/* ================= Polish: the small things =================
+   Runs after every screen draw. None of this adds features; it makes what's there feel finished:
+   a top bar that turns to glass with a compact title once you scroll, a sliding day selection, numbers that count up
+   when a screen opens, remembered scroll positions, and a soft fade where content meets the tab bar. */
+let topEl = null, topThresh = Infinity, lastViewKey = '', weekPos = null;
+const scrollMemo = {}, tabScroll = {};
+function syncTopbar() {
+  if (!topEl || !topEl.isConnected) return;
+  const y = window.scrollY;
+  topEl.classList.toggle('scrolled', y > 4);
+  topEl.classList.toggle('titled', y > topThresh);
+}
+window.addEventListener('scroll', syncTopbar, { passive: true });
+// Count a number up to its value (keeps its decimals and thousands separators)
+function countUp(node) {
+  const txt = node.textContent.trim(), m = txt.match(/^(\d[\d,]*)(\.\d+)?$/);
+  if (!m) return;
+  const end = parseFloat(txt.replace(/,/g, '')), dec = m[2] ? m[2].length - 1 : 0, comma = txt.includes(',');
+  if (!(end > 0)) return;
+  const fmt = v => comma ? v.toLocaleString('en-GB', { minimumFractionDigits: dec, maximumFractionDigits: dec }) : v.toFixed(dec);
+  const t0 = performance.now(), dur = 650;
+  const step = now => {
+    if (!node.isConnected) return;
+    const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    node.textContent = p < 1 ? fmt(end * e) : txt;
+    if (p < 1) requestAnimationFrame(step);
+  };
+  node.textContent = fmt(0);
+  requestAnimationFrame(step);
+}
+function polish() {
+  if (!$('dockfade')) { const f = document.createElement('div'); f.id = 'dockfade'; f.setAttribute('aria-hidden', 'true'); document.body.appendChild(f); }
+  // Top bar: glass once content scrolls under it, with the screen's title in small type
+  topEl = app.querySelector('header.nav, header.weekhead');
+  const lt = app.querySelector('.large-title');
+  topThresh = Infinity;
+  if (topEl && lt && topEl.classList.contains('nav') && !topEl.querySelector('.title')) {
+    const t = document.createElement('span'); t.className = 'nav-title'; t.setAttribute('aria-hidden', 'true'); t.textContent = lt.textContent;
+    topEl.appendChild(t);
+    topThresh = lt.getBoundingClientRect().bottom + window.scrollY - (topEl.offsetHeight + 12);
+  }
+  syncTopbar();
+  // Week strip: the selected day's capsule slides to the day you pick
+  const week = app.querySelector('#weekTrack > .week'), sel = week && week.querySelector('.day.sel');
+  if (sel) {
+    const ind = document.createElement('span'); ind.className = 'week-ind' + (sel.classList.contains('today') ? ' today' : ''); ind.setAttribute('aria-hidden', 'true');
+    week.prepend(ind); week.classList.add('has-ind');
+    const key = dk(state.weekStart), r = { x: sel.offsetLeft, w: sel.offsetWidth };
+    slideTo(ind, weekPos && weekPos.key === key ? weekPos : null, r);
+    weekPos = { key, ...r };
+  }
+  // Opening a screen: headline numbers count up
+  const key = `${state.tab}:${state.views[state.tab]}:${state.logExId || ''}:${state.detailExId || ''}:${state.stat || ''}:${state.sumDate || ''}`;
+  if (key !== lastViewKey && !reduceMotion()) {
+    app.querySelectorAll('.stat-n').forEach(countUp);
+    app.querySelectorAll('.headline').forEach(h => { if (h.firstChild && h.firstChild.nodeType === 3) countUp(h.firstChild); });
+  }
+  lastViewKey = key;
+}
+
+// Sets written compactly: the weight once, then the reps ("82.5 kg × 8, 7 · 85 kg × 5")
+function setsCompact(ss) {
+  const out = [];
+  for (const s of ss) { const w = +s.weight, last = out[out.length - 1]; if (last && last.w === w) last.r.push(s.reps | 0); else out.push({ w, r: [s.reps | 0] }); }
+  return out.map(g => g.w > 0 ? `${W(g.w)} ${U()} × ${g.r.join(', ')}` : `${g.r.join(', ')} reps`).join(' · ');
+}
+// A small ring showing how much of an exercise is done (a green check when it's all done)
+function ringHTML(done, total) {
+  const full = total > 0 && done >= total, C = 2 * Math.PI * 10;
+  return `<span class="pring ${full ? 'full' : ''}" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10" class="trk"/>${full
+    ? '<path d="M9.5 14.5l3 3 6-7" class="chk"/>'
+    : done ? `<circle cx="14" cy="14" r="10" class="arc" stroke-dasharray="${(C * done / total).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 14 14)"/>` : ''}</svg></span>`;
+}
+// A smooth line through the points that never overshoots them (monotone cubic)
+function smoothPath(P) {
+  const n = P.length, f = v => v.toFixed(1);
+  if (n < 3) return P.map((p, i) => `${i ? 'L' : 'M'}${f(p[0])},${f(p[1])}`).join('');
+  const dx = [], m = [], t = [];
+  for (let i = 0; i < n - 1; i++) { dx[i] = P[i + 1][0] - P[i][0]; m[i] = (P[i + 1][1] - P[i][1]) / (dx[i] || 1); }
+  t[0] = m[0]; t[n - 1] = m[n - 2];
+  for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { t[i] = t[i + 1] = 0; continue; }
+    const a = t[i] / m[i], b = t[i + 1] / m[i], s = a * a + b * b;
+    if (s > 9) { const k = 3 / Math.sqrt(s); t[i] = k * a * m[i]; t[i + 1] = k * b * m[i]; }
+  }
+  let d = `M${f(P[0][0])},${f(P[0][1])}`;
+  for (let i = 0; i < n - 1; i++) { const h = dx[i] / 3; d += `C${f(P[i][0] + h)},${f(P[i][1] + t[i] * h)} ${f(P[i + 1][0] - h)},${f(P[i + 1][1] - t[i + 1] * h)} ${f(P[i + 1][0])},${f(P[i + 1][1])}`; }
+  return d;
+}
+const SKELETON = `<div class="skel-wrap" role="status" aria-label="Loading"><div class="stat-row three"><div class="skel sk-stat"></div><div class="skel sk-stat"></div><div class="skel sk-stat"></div></div>
+  <div class="skel sk-title"></div><div class="skel sk-card"></div></div>`;
 
 /* ================= Tab bar ================= */
 // Place a freshly drawn selection highlight: it starts where it was last time (no animation from the edge),
@@ -244,9 +343,14 @@ function renderDock() {
   }
   dock.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => {
     const t = b.dataset.tab;
-    if (state.tab === t) { go(TAB_ROOT[t]); return; }
+    if (state.tab === t) { if (state.views[t] === TAB_ROOT[t]) window.scrollTo({ top: 0, behavior: reduceMotion() ? 'auto' : 'smooth' }); else go(TAB_ROOT[t]); return; }
     haptic();
-    state.tab = t; state.pending = null; render(); window.scrollTo(0, 0);
+    tabScroll[state.tab] = window.scrollY;
+    state.tab = t; state.pending = null; render(); window.scrollTo(0, tabScroll[t] || 0); syncTopbar();
+    if (!reduceMotion()) {
+      app.classList.remove('tab-in'); void app.offsetWidth; app.classList.add('tab-in');
+      const nb = $('dock').querySelector('button.on'); if (nb) nb.classList.add('pop');
+    }
   });
 }
 
@@ -416,11 +520,11 @@ function renderDay() {
       const ex = exById(it.exId); if (!ex) return '';
       const s = setsFor(it.exId, k);
       const total = Math.max(it.sets || 0, s.length);
-      const sub = s.length ? s.map(x => `${W(x.weight)}×${x.reps}`).join(', ') : `${plural(total, 'set')} planned`;
+      const sub = s.length ? setsCompact(s) + (s.length < total ? ` · ${total - s.length} to go` : '') : plural(total, 'set');
       const confirm = k === state.selected && state.pending === 'trash:' + it.exId;
       return `<div class="cell-wrap drag-row" data-row="${it.exId}">
         <button class="grip" aria-label="Drag to reorder ${esc(ex.name)}">${ICON_GRIP}</button>
-        <button class="cell" data-ex="${it.exId}" style="padding-left:4px"><span class="main"><div>${esc(ex.name)}</div><div class="sub">${s.length ? `${s.length}/${total} · ` : ''}${sub}</div></span></button>
+        <button class="cell" data-ex="${it.exId}" style="padding-left:0">${ringHTML(s.length, total)}<span class="main"><div>${esc(ex.name)}</div><div class="sub">${sub}</div></span></button>
         <button class="trash ${confirm ? 'confirm' : ''}" data-trash="${it.exId}" aria-label="Remove ${esc(ex.name)}">${confirm ? 'Delete' : ICON_TRASH}</button>
       </div>`;
     }).join('');
@@ -434,7 +538,15 @@ function renderDay() {
     ${canRest ? `<button class="capsule glass move-btn" id="restDay">${svg('<path d="M4 12h13M13 7l5 5-5 5"/>', 15, 2.2)} ${k === tk ? "Can't make it today" : 'Move back a day'}</button>` : ''}
     ${canUnrest ? `<button class="capsule glass move-btn" id="unrestDay">${svg('<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5"/>', 15, 2.2)} Undo move</button>` : ''}
     ${canUnpin ? `<button class="capsule glass move-btn" id="unpinDay">${svg('<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5"/>', 15, 2.2)} Undo</button>` : ''}
-    ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : ''}
+    ${(() => {
+      if (!day.items.length || !(day.session || logged.has(k))) return '';
+      const total = day.items.reduce((a, it) => a + Math.max(it.sets || 0, setsFor(it.exId, k).length), 0), done = day.items.reduce((a, it) => a + setsFor(it.exId, k).length, 0);
+      return total ? `<div class="dprog ${done >= total ? 'full' : ''}" role="progressbar" aria-label="Sets done" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><i style="width:${Math.round(100 * done / total)}%"></i></div>` : '';
+    })()}
+    ${day.items.length ? `<div class="group" id="dayList">${rows}</div>` : `<div class="day-empty"><span class="de-ic">${pd && !pd.workout
+        ? svg('<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>', 26, 1.8) : svg('<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>', 26, 1.8)}</span>
+      <b>${pd && !pd.workout ? 'Rest day' : k < tk ? 'Nothing logged' : 'Nothing planned'}</b>
+      <span>${pd && !pd.workout ? 'Recovery is part of the plan.' : k < tk ? 'You can still add what you did.' : 'Add an exercise or a workout to get going.'}</span></div>`}
     ${day.items.length && canFinish(k) ? `<button class="primary" id="finishDay">${svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 18, 2.6)}&nbsp;Finish workout</button>` : ''}
     <button class="btn-tinted" id="addEx">${ICON_PLUS} Add exercise / workout</button>`;
   };
@@ -547,7 +659,7 @@ function logBodyHTML(m) {
     <div class="large-title">${esc(ex.name)}</div>
     <button class="lastbar" id="history">
       <span class="main"><span class="lb-label">${prevK ? `Last time · ${fmtShort(prevK)}` : 'Last time'}</span>
-      <span class="lb-sets">${prevK ? prevSets.map(s => `<span style="white-space:nowrap">${W(+s.weight)} ${U()} × ${s.reps | 0}</span>`).join(', ') : 'No earlier sessions'}</span></span>
+      <span class="lb-sets">${prevK ? setsCompact(prevSets) : 'No earlier sessions'}</span></span>
       <span class="lb-more">History <span class="chev">${ICON_CHEV}</span></span>
     </button>
     ${ex.instructions || vid ? `<details class="instr"><summary>Instructions</summary>
@@ -1085,7 +1197,7 @@ function historyHTML(exId) {
     const ss = setsFor(exId, k);
     const best = Math.max(...ss.map(e1rm));
     const pr = prSet[k] ? { set: { id: prSet[k] } } : null;
-    return `<div class="hcard"><div class="hcard-head"><b>${fmtDayYear(k)}</b><span>e1RM ${fmtStat(toU(best), 'e1rm')} ${U()}</span></div>
+    return `<div class="hcard"><div class="hcard-head"><b>${relDay(k)}</b><span>e1RM ${fmtStat(toU(best), 'e1rm')} ${U()}</span></div>
       ${ss.map((s, i) => `<div class="hset"><span class="n">${i + 1}</span><span class="v">${W(+s.weight)} ${U()} × ${s.reps | 0}${pr && pr.set.id === s.id ? '<span class="pr-badge">PR</span>' : ''}</span></div>`).join('')}</div>`;
   }).join('') : '<div class="group"><div class="empty">No sets logged yet.</div></div>');
 }
@@ -1130,14 +1242,19 @@ function drawChart(box, pts, stat) {
   const xl = pts.length > 1
     ? `<text x="${L}" y="${H - 4}" font-size="11" fill="${axis}">${fmtTiny(pts[0].k)}</text><text x="${W - R}" y="${H - 4}" text-anchor="end" font-size="11" fill="${axis}">${fmtTiny(pts[pts.length - 1].k)}</text>`
     : `<text x="${x(t0)}" y="${H - 4}" text-anchor="middle" font-size="11" fill="${axis}">${fmtTiny(pts[0].k)}</text>`;
-  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join('');
-  const dots = pts.map(p => `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="4" fill="${tint}" stroke="${ring}" stroke-width="2"/>`).join('');
-  box.innerHTML = `<svg width="${W}" height="${H}" role="img" aria-label="${stat.label} over time">
+  const d = smoothPath(pts.map(p => [x(p.t), y(p.v)]));
+  const lastP = pts[pts.length - 1];
+  const dots = pts.length > 24 ? '' : pts.slice(0, -1).map(p => `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="3" fill="${tint}" stroke="${ring}" stroke-width="1.5"/>`).join('');
+  const end = `<circle class="halo" cx="${x(lastP.t)}" cy="${y(lastP.v)}" r="9" fill="${tint}" opacity=".18"/><circle cx="${x(lastP.t)}" cy="${y(lastP.v)}" r="4.5" fill="${tint}" stroke="${ring}" stroke-width="2"/>`;
+  const animKey = `${state.tab}:${state.views[state.tab]}:${stat.key}:${pts.length}:${W}`;
+  const still = animKey === drawChart.last || reduceMotion();
+  drawChart.last = animKey;
+  box.innerHTML = `<svg class="${still ? 'still' : 'draw'}" width="${W}" height="${H}" role="img" aria-label="${stat.label} over time">
       ${grid}${xl}
-      <defs><linearGradient id="fillG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${tint}" stop-opacity=".22"/><stop offset="1" stop-color="${tint}" stop-opacity="0"/></linearGradient></defs>
-      ${pts.length > 1 ? `<path d="${d}L${x(t1).toFixed(1)},${H - B}L${x(t0).toFixed(1)},${H - B}Z" fill="url(#fillG)"/>` : ''}
-      <path d="${d}" fill="none" stroke="${tint}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-      ${dots}
+      <defs><linearGradient id="fillG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${tint}" stop-opacity=".26"/><stop offset=".65" stop-color="${tint}" stop-opacity=".05"/><stop offset="1" stop-color="${tint}" stop-opacity="0"/></linearGradient></defs>
+      ${pts.length > 1 ? `<path class="c-area" d="${d}L${x(t1).toFixed(1)},${H - B}L${x(t0).toFixed(1)},${H - B}Z" fill="url(#fillG)"/>` : ''}
+      <path class="c-line" pathLength="1" d="${d}" fill="none" stroke="${tint}" stroke-width="2.75" stroke-linejoin="round" stroke-linecap="round"/>
+      <g class="c-dots">${dots}</g><g class="c-end">${end}</g>
       <line id="cross" y1="${T - 4}" y2="${H - B}" stroke="${axis}" stroke-opacity=".5" visibility="hidden"/>
       <circle id="focus" r="6" fill="${tint}" stroke="${ring}" stroke-width="2" visibility="hidden"/>
       <rect id="hit" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>
@@ -1147,6 +1264,7 @@ function drawChart(box, pts, stat) {
     const mx = e.clientX - hit.getBoundingClientRect().left;
     let p = pts[0];
     for (const q of pts) if (Math.abs(x(q.t) - mx) < Math.abs(x(p.t) - mx)) p = q;
+    if (show.last !== p) { if (show.last) haptic(); show.last = p; }   // a light tick as you scrub from point to point
     const px = x(p.t), py = y(p.v);
     cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.setAttribute('visibility', 'visible');
     focus.setAttribute('cx', px); focus.setAttribute('cy', py); focus.setAttribute('visibility', 'visible');
@@ -1870,7 +1988,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.23';
+const APP_VERSION = '0.24';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2184,7 +2302,7 @@ function renderFriend() {
   let body = '';
   if (!theyShare) body = `<div class="group"><div class="empty">${esc(name)} isn't sharing their training with you.</div></div>`;
   else if (state.friendErr) body = `<div class="err">${esc(state.friendErr)}</div>`;
-  else if (!c) body = `<div class="group"><div class="empty">Loading ${esc(name)}'s training…</div></div>`;
+  else if (!c) body = SKELETON;
   else body = profileBodyHTML(c, true);
   app.innerHTML = `
     <header class="nav">${backBtn('Friends')}<span class="spacer"></span>${theyShare ? `<button class="circle glass" id="fRefresh" aria-label="Refresh">${svg('<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>', 18, 2.2)}</button>` : ''}</header>
@@ -2883,7 +3001,7 @@ function renderFriendExercise() {
     <header class="nav">${backBtn('Back')}</header>
     <div class="eyebrow">${esc(nameOf(l))}</div>
     <div class="large-title">${esc(ex.name)}</div>
-    ${cached ? (state.statSrc = cached.sets, progressHTML(ex.id) + historyHTML(ex.id)) : '<div class="group"><div class="empty">Loading…</div></div>'}`;
+    ${cached ? (state.statSrc = cached.sets, progressHTML(ex.id) + historyHTML(ex.id)) : SKELETON}`;
   $('back').onclick = () => go(backOf('fEx'));
   if (cached) { wireProgress(ex.id); state.statSrc = null; }
   else loadFriendExercise(o, ex.id).then(() => { if (state.views.friends === 'fEx') render(); }).catch(() => {});

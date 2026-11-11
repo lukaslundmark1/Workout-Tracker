@@ -502,6 +502,96 @@
   .delta { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .delta.up { color: var(--green); } .delta.down { color: var(--red); } .delta.same { color: var(--label2); font-weight: 500; }
   .cell .lead-ic { width: 32px; height: 32px; border-radius: 50%; background: rgba(255,159,10,.15); color: #ff9f0a; display: flex; align-items: center; justify-content: center; flex: none; }
+
+  /* ================= Polish layer ================= */
+  :root { --card-shadow: 0 1px 2px rgba(0,0,0,.03), 0 6px 20px -10px rgba(0,0,0,.08); }
+  @media (prefers-color-scheme: dark) { :root[data-theme="system"] { --card-shadow: none; } }
+  :root[data-theme="dark"] { --card-shadow: none; }
+  ::selection { background: var(--tint-soft); }
+  input, textarea { caret-color: var(--tint); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--tint); outline-offset: 2px; }
+  .large-title { letter-spacing: -.026em; text-wrap: balance; }
+  .section, .day-title { text-wrap: balance; }
+  .footnote, .hero p, .finish-sub, .mv-d { text-wrap: pretty; }
+  .cell .sub, .day-sub, .stat-n, .headline, .hsub { font-variant-numeric: tabular-nums; }
+  .cell .chev { opacity: .75; }
+
+  /* Depth: cards sit a hair above the page in light mode */
+  .group, .card, .hcard, .stat, .cal-card, .lastbox { box-shadow: var(--card-shadow); }
+  .sheet .group, .sheet .stat { box-shadow: none; }
+
+  /* Top bar: sticks, turns to glass once content scrolls under it, and shows the title in small type */
+  header.nav, header.weekhead { position: sticky; top: env(safe-area-inset-top); z-index: 6; }
+  header.nav::before, header.weekhead::before { content: ""; position: absolute; z-index: -1; left: -16px; right: -16px; top: calc(-1 * env(safe-area-inset-top)); bottom: -4px;
+    background: var(--glass); -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%);
+    border-bottom: .5px solid var(--sep); opacity: 0; transition: opacity .22s ease; pointer-events: none; }
+  header.scrolled::before { opacity: 1; }
+  .nav-title { position: absolute; left: 50%; top: 50%; max-width: 52%; transform: translate(-50%, calc(-50% + 8px)); opacity: 0; font-weight: 600; font-size: 17px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; transition: opacity .2s ease, transform .35s var(--spring); }
+  header.titled .nav-title { opacity: 1; transform: translate(-50%, -50%); }
+  .ghost header.nav, .ghost header.weekhead { position: relative; top: 0; }
+
+  /* Where content meets the tab bar it fades out instead of colliding with it */
+  #dockfade { position: fixed; left: 0; right: 0; bottom: 0; height: calc(104px + env(safe-area-inset-bottom)); z-index: 9; pointer-events: none;
+    background: linear-gradient(to top, var(--bg) 0%, var(--bg) 22%, transparent 100%); }
+  .pdots { z-index: 10; }
+
+  /* Tabs: the new tab settles in, its icon gives a small pop */
+  #app.tab-in { animation: tabIn .32s var(--spring); }
+  @keyframes tabIn { from { opacity: 0; transform: translateY(10px) scale(.992); } }
+  #dock button.pop svg { animation: iconPop .5s var(--bounce); }
+  @keyframes iconPop { 0% { transform: scale(.78); } 55% { transform: scale(1.14); } 100% { transform: scale(1); } }
+  #dock button svg { transition: transform .3s var(--bounce); }
+
+  /* Week strip: the selection is a capsule that slides between days */
+  .week { position: relative; }
+  .week.has-ind .day.sel, .week.has-ind .day.sel.today { background: transparent; }
+  .week-ind { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 22px; background: var(--label); z-index: 0;
+    transition: transform .5s var(--bounce-soft), width .5s var(--bounce-soft), background .25s ease; box-shadow: 0 6px 14px -8px rgba(0,0,0,.35); }
+  .week-ind.today { background: var(--red); box-shadow: 0 8px 16px -8px var(--red); }
+  .week .day { position: relative; z-index: 1; }
+  .day .wd, .day .num { transition: color .2s ease; }
+
+  /* Day: progress while a workout is on, rings per exercise, a proper empty state */
+  .dprog { height: 5px; border-radius: 3px; background: var(--fill); margin: -4px 2px 16px; overflow: hidden; }
+  .dprog i { display: block; height: 100%; border-radius: 3px; background: var(--tint); transition: width .6s var(--spring), background .3s; }
+  .dprog.full i { background: var(--green); }
+  .pring { width: 28px; height: 28px; flex: none; display: inline-flex; }
+  .pring .trk { fill: none; stroke: var(--fill2); stroke-width: 3; }
+  .pring .arc { fill: none; stroke: var(--tint); stroke-width: 3; stroke-linecap: round; }
+  .pring.full .trk { fill: var(--green); stroke: var(--green); }
+  .pring .chk { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .day-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 34px 20px 26px; color: var(--label2); font-size: 15px; }
+  .day-empty b { color: var(--label); font-size: 19px; font-weight: 700; letter-spacing: -.02em; margin-top: 10px; }
+  .de-ic { width: 64px; height: 64px; border-radius: 50%; background: var(--fill); color: var(--label2); display: flex; align-items: center; justify-content: center; }
+
+  /* Buttons: the main action has a little light and shadow of its own */
+  .primary { background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 90%, #fff) 0%, var(--tint) 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 10px 22px -12px var(--tint); transition: transform .5s var(--bounce), box-shadow .3s, opacity .2s; }
+  .primary:active { box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 4px 10px -8px var(--tint); }
+  .primary:disabled { box-shadow: none; }
+  .primary.destructive-fill { background: linear-gradient(180deg, color-mix(in srgb, var(--red) 90%, #fff) 0%, var(--red) 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 10px 22px -12px var(--red); }
+  .search { transition: background .2s ease, box-shadow .2s ease; }
+  .search:focus-within { background: var(--card); box-shadow: 0 0 0 2px var(--tint) inset; }
+  .field-input { transition: background .2s; }
+
+  /* Sheets get a grabber, like every sheet on iPhone */
+  .sheet::before { content: ""; display: block; position: sticky; top: 7px; z-index: 2; width: 36px; height: 5px; border-radius: 3px; background: var(--label3); margin: 7px auto -12px; }
+
+  /* Chart: the line draws itself, the area and points follow */
+  .chart svg.draw .c-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: lineDraw .9s .05s cubic-bezier(.4,0,.2,1) forwards; }
+  .chart svg.draw .c-area { opacity: 0; animation: fadeIn .6s .45s ease forwards; }
+  .chart svg.draw .c-dots { opacity: 0; animation: fadeIn .35s .7s ease forwards; }
+  .chart svg.draw .c-end { opacity: 0; transform-box: fill-box; animation: fadeIn .3s .85s ease forwards; }
+  .chart .halo { transform-box: fill-box; transform-origin: center; animation: halo 2.4s 1.2s ease-out infinite; }
+  @keyframes lineDraw { to { stroke-dashoffset: 0; } }
+  @keyframes fadeIn { to { opacity: 1; } }
+  @keyframes halo { 0% { transform: scale(.6); opacity: .35; } 70%, 100% { transform: scale(1.9); opacity: 0; } }
+
+  /* Loading placeholders */
+  .skel { border-radius: var(--r); background: linear-gradient(100deg, var(--fill) 30%, var(--fill-faint) 50%, var(--fill) 70%); background-size: 220% 100%; animation: shimmer 1.3s linear infinite; }
+  .sk-stat { height: 72px; } .sk-title { height: 24px; width: 46%; border-radius: 8px; margin: 30px 2px 12px; } .sk-card { height: 190px; }
+  @keyframes shimmer { from { background-position: 120% 0; } to { background-position: -100% 0; } }
 </style>
 </head>
 <body>
@@ -509,6 +599,6 @@
 <nav id="dock" class="glass" aria-label="Navigation"></nav>
 <div id="sheet" hidden></div>
 
-<script src="app.js?v=2383177279"></script>
+<script src="app.js?v=b3a476d974"></script>
 </body>
 </html>
