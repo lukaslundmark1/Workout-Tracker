@@ -20,7 +20,7 @@ SHOTS = [("day","state.tab='today'; go('day')"),("log","state.tab='today'; go('l
  ("friends","state.tab='friends'; go('friends')"),("me","state.tab='friends'; go('me',{prof:'me'})"),("settings","state.tab='settings'; go('settings')")]
 async def main(tag, themes):
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome')
+        b = await p.chromium.launch(**({'executable_path': '/usr/bin/google-chrome'} if __import__('os').path.exists('/usr/bin/google-chrome') else {}))
         for theme in themes:
             pg = await b.new_page(viewport={'width':390,'height':844}, device_scale_factor=2)
             await pg.goto('http://localhost:8765/'); await pg.wait_for_timeout(400)

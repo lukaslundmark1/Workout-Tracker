@@ -2,7 +2,7 @@ import asyncio
 from playwright.async_api import async_playwright
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome')
+        b = await p.chromium.launch(**({'executable_path': '/usr/bin/google-chrome'} if __import__('os').path.exists('/usr/bin/google-chrome') else {}))
         errs=[]
         for theme in ['dark','light']:
             pg = await b.new_page(viewport={'width':390,'height':844}, device_scale_factor=2, has_touch=True)

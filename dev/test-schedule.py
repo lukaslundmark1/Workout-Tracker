@@ -10,7 +10,7 @@ SCHED = "(a)=>{ const from=(a&&a[0])||0, n=(a&&a[1])||8; schedCache=null; return
 TRAIN = "([off, wid, idx]) => { const k=dk(addDays(new Date(),off)); const w=woById(wid); data.days[k]={items:w.items.map(i=>({...i})),workouts:[{id:w.id,name:w.name}],plan:{id:'p1',index:idx}}; data.sets.push({id:uid(),exId:w.items[0].exId,date:k,slot:0,weight:50,reps:5,ts:Date.now()}); save(); render(); }"
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome')
+        b = await p.chromium.launch(**({'executable_path': '/usr/bin/google-chrome'} if __import__('os').path.exists('/usr/bin/google-chrome') else {}))
         pg = await b.new_page(viewport={'width':390,'height':844}, device_scale_factor=2)
         errs=[]; pg.on('pageerror', lambda e: errs.append(str(e)))
         W=lambda t=300: pg.wait_for_timeout(t)

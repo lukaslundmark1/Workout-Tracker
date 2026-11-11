@@ -70,7 +70,7 @@ TIMED = """async (js) => {
 
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome', args=['--disable-extensions'])
+        b = await p.chromium.launch(**({'executable_path': '/usr/bin/google-chrome'} if __import__('os').path.exists('/usr/bin/google-chrome') else {}), args=['--disable-extensions'])
         ctx = await b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=3, has_touch=True, service_workers='block')
         pg = await ctx.new_page()
         errs = []

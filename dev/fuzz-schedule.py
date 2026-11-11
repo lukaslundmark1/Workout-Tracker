@@ -29,7 +29,7 @@ CHECK = """JSON.stringify([planSchedule().map, upNext() && upNext().k, Array.fro
 
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome')
+        b = await p.chromium.launch(**({'executable_path': '/usr/bin/google-chrome'} if __import__('os').path.exists('/usr/bin/google-chrome') else {}))
         pages = []
         for port in (OLD, NEW):
             ctx = await b.new_context(service_workers='block', reduced_motion='reduce')

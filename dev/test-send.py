@@ -2,7 +2,7 @@ import asyncio, json
 from playwright.async_api import async_playwright
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path='/usr/bin/google-chrome')
+        b = await p.chromium.launch(**({'executable_path': '/usr/bin/google-chrome'} if __import__('os').path.exists('/usr/bin/google-chrome') else {}))
         errs=[]
         pg = await b.new_page(viewport={'width':390,'height':844}, device_scale_factor=2)
         pg.on('pageerror', lambda e: errs.append(str(e)))

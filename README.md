@@ -1,5 +1,7 @@
 # Training tracker (PWA)
 
+> Working on this with Claude Code? Start with `CLAUDE.md`, then `docs/DECISIONS.md`.
+
 A workout tracker and planner that runs in the browser and installs on iPhone and Android.
 Hosted on GitHub Pages; accounts, sync and friends use a free Firebase project.
 
