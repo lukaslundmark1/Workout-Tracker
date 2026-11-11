@@ -351,6 +351,15 @@
   .profile input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font-size: 20px; font-weight: 600; padding: 6px 0; }
   .profile input::placeholder { color: var(--label3); }
   .badge { font-size: 12px; font-weight: 600; color: var(--label2); background: var(--fill); border-radius: 10px; padding: 3px 8px; }
+  .badge.ok { color: var(--green); background: var(--green-soft); }
+  .set-row .sub { font-size: 13px; color: var(--label2); margin-top: 1px; }
+  .pick-dot { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--label3); display: flex; align-items: center; justify-content: center; color: #fff; flex: none; box-sizing: border-box; transition: transform .4s var(--bounce), background .2s, border-color .2s; }
+  .pick-row.on .pick-dot { background: var(--tint); border-color: var(--tint); transform: scale(1.05); }
+  .pick-row:active .pick-dot { transform: scale(.85); transition: transform .1s ease-out; }
+  .gift-head { text-align: center; margin: 2px 0 6px; }
+  .gift-ic { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 10px; background: var(--tint-soft); color: var(--tint); display: flex; align-items: center; justify-content: center; }
+  .gift-ic svg { width: 26px; height: 26px; }
+  .inbox-ic { width: 36px; height: 36px; border-radius: 50%; background: var(--tint-soft); color: var(--tint); display: flex; align-items: center; justify-content: center; flex: none; }
   .hero { text-align: center; padding: 28px 22px 24px; }
   .hero-icon { width: 76px; height: 76px; border-radius: 24px; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; color: #fff; background: linear-gradient(135deg, #34c759, #30b0c7); }
   .hero h2 { font-size: 22px; margin: 0 0 6px; letter-spacing: -.02em; }
@@ -606,6 +615,7 @@ const ICON_SETTINGS = svg('<circle cx="12" cy="12" r="3"/><path d="M12 2.8l1.6 2
 const ICON_EXERCISES = svg('<path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>', 26, 1.9);
 const ICON_X = svg('<path d="M6 6l12 12M18 6L6 18"/>', 18, 2.4);
 const ICON_OK = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 20, 2.6);
+const ICON_GIFT = svg('<path d="M4 12l16-8-6 16-2-7-8-1z"/>', 18, 2);
 const ICON_PLUS = svg('<path d="M12 5v14M5 12h14"/>', 16, 2.6);
 const ICON_PREV = svg('<path d="M15 5l-7 7 7 7"/>', 18, 2.4);
 const ICON_NEXT = svg('<path d="M9 5l7 7-7 7"/>', 18, 2.4);
@@ -730,7 +740,7 @@ function renderDock() {
   // Today stays in the middle
   const tabs = [['friends', 'Friends', ICON_FRIENDS], ['workouts', 'Workouts', ICON_WORKOUTS], ['today', 'Today', ICON_TODAY], ['exercises', 'Exercises', ICON_EXERCISES], ['settings', 'Settings', ICON_SETTINGS]];
   const dock = $('dock');
-  const reqs = (typeof friends !== 'undefined' && cloud.user) ? friends.links.filter(l => l.status === 'pending' && l.from !== cloud.user.uid).length : 0;
+  const reqs = (typeof friends !== 'undefined' && cloud.user) ? friends.links.filter(l => l.status === 'pending' && l.from !== cloud.user.uid).length + pendingGifts().length : 0;
   dock.innerHTML = tabs.map(([t, label, icon]) => `<button data-tab="${t}" class="${state.tab === t ? 'on' : ''}" aria-label="${label}${t === 'friends' && reqs ? `, ${reqs} new` : ''}">${icon}${t === 'friends' && reqs ? `<span class="tab-badge">${reqs}</span>` : ''}<span>${label}</span></button>`).join('');
   // The selection pill slides from the previous tab to the new one
   const on = dock.querySelector('button.on');
@@ -1917,6 +1927,7 @@ function renderPlanView() {
         <span class="detail" style="color:${now ? 'var(--tint)' : 'var(--label2)'};font-weight:${now ? 600 : 400}">${now ? 'Up next' : w ? plural(w.items.length, 'exercise') : ''}</span></div>`;
     }).join('') || '<div class="empty">No days yet. Tap Edit to build the rotation.</div>'}</div>
     <div class="footnote">After the last day it starts again from day 1.${p.weeks ? ` Runs for ${plural(p.weeks, 'week')}.` : ' Runs until you end it.'}</div>
+    <div class="group" style="margin-top:14px"><button class="cell action" id="sendP" ${p.days.length ? '' : 'disabled'}>${ICON_GIFT}Send to a friend</button></div>
     ${isActive ? `
       <div class="section">Coming up</div>
       <div class="group">${coming.map(k => {
@@ -1931,6 +1942,7 @@ function renderPlanView() {
   $('back').onclick = () => go('wList');
   $('editP').onclick = () => go('pEdit', { pdraft: { id: p.id, name: p.name, weeks: p.weeks, days: p.days.map(d => ({ ...d })) } });
   if ($('startP')) $('startP').onclick = () => openSheet({ type: 'planStart', planId: p.id });
+  $('sendP').onclick = () => openSheet({ type: 'sendTo', kind: 'plan', id: p.id });
   app.querySelectorAll('[data-goday]').forEach(b => b.onclick = () => { const k = b.dataset.goday; state.tab = 'today'; state.views.today = 'day'; state.selected = k; state.weekStart = startOfWeek(parse(k)); render(); window.scrollTo(0, 0); });
   if ($('endP')) $('endP').onclick = () => {
     if (state.pending !== 'endP') { state.pending = 'endP'; return render(); }
@@ -2084,13 +2096,15 @@ function renderWorkoutEdit() {
     <div class="section">Exercises</div>
     <div class="group"><div id="wList">${rows}</div><div class="cell-wrap"><button class="cell action" id="addToW">${plusLead}Add exercise</button></div></div>
     <div class="err" id="wErr"></div>
-    ${dr.id ? `<div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'delW' ? 'confirm' : ''}" id="delW">${state.pending === 'delW' ? 'Tap again to delete' : 'Delete Workout'}</button></div>
+    ${dr.id ? `<div class="group" style="margin-top:28px"><button class="cell action" id="sendW" ${dr.items.length ? '' : 'disabled'}>${ICON_GIFT}Send to a friend</button></div>
+      <div class="group" style="margin-top:14px"><button class="cell destructive ${state.pending === 'delW' ? 'confirm' : ''}" id="delW">${state.pending === 'delW' ? 'Tap again to delete' : 'Delete Workout'}</button></div>
       ${state.pending === 'delW' && usedIn.length ? `<div class="footnote" style="color:var(--red)">Used in ${usedIn.map(p => esc(p.name)).join(', ')}. Those days will become rest days.</div>` : ''}` : ''}`;
   const name = $('wName');
   name.value = dr.name;
   name.oninput = () => { dr.name = name.value; };
   $('cancel').onclick = () => go('wList', { draft: null });
   $('addToW').onclick = () => openSheet({ type: 'addToWorkout', step: 'pick', q: '' });
+  if ($('sendW')) $('sendW').onclick = () => openSheet({ type: 'sendTo', kind: 'workout', id: dr.id, draft: { name: dr.name.trim() || 'Workout', items: dr.items.map(i => ({ ...i })) } });
   app.querySelectorAll('[data-sets]').forEach(b => b.onclick = () => openSheet({ type: 'setCount', index: Number(b.dataset.sets) }));
   app.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { dr.items.splice(Number(b.dataset.rm), 1); render(); });
   makeSortable($('wList'), (from, to) => { dr.items.splice(to, 0, dr.items.splice(from, 1)[0]); render(); });
@@ -2365,7 +2379,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.21.2';
+const APP_VERSION = '0.22';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2483,7 +2497,7 @@ function renderSettings() {
 // Friends are a symmetric link between two people (links/{uidA_uidB}). Each person controls their own
 // switches on the link: share[myUid] = whether the other person can see my training (read-only).
 // Invites use a short code (codes/{CODE} → uid + name) or a link to the app with #add-CODE.
-const friends = { links: [], unsub: null, cache: {}, exCache: {}, error: '', nameTimer: null };
+const friends = { links: [], unsub: null, cache: {}, exCache: {}, error: '', nameTimer: null, gifts: { in: [], out: [], seen: null, error: '' }, giftUnsubs: [] };
 const pairId = (a, b) => (a < b ? a + '_' + b : b + '_' + a);
 const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const fmtCode = c => (c ? c.slice(0, 3) + '-' + c.slice(3) : '');
@@ -2505,9 +2519,10 @@ function startFriends() {
     renderDock();
     if (['friends', 'friend'].includes(state.views.friends) && state.tab === 'friends' && !state.sheet) render();
   }, e => { friends.error = isPerm(e) ? 'rules' : (e.code || e.message); if (state.tab === 'friends') render(); });
+  startGifts();
   if (state.inviteCode) openSheet({ type: 'addFriend', code: state.inviteCode, auto: true }), (state.inviteCode = null);
 }
-function stopFriends() { if (friends.unsub) friends.unsub(); friends.unsub = null; friends.links = []; friends.cache = {}; friends.exCache = {}; }
+function stopFriends() { if (friends.unsub) friends.unsub(); friends.unsub = null; friends.links = []; friends.cache = {}; friends.exCache = {}; stopGifts(); }
 
 // Each account gets one friend code, reserved in codes/{CODE}
 // Your code is worked out from your account id, so every device shows the same code and it never changes.
@@ -2624,7 +2639,11 @@ function renderFriends() {
   const outgoing = friends.links.filter(l => l.status === 'pending' && l.from === me);
   const accepted = friends.links.filter(l => l.status === 'accepted').sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
   const avatar = n => `<span class="avatar sm">${esc(initialOf(n))}</span>`;
+  const inbox = pendingGifts();
   app.innerHTML = head + meCell + `
+    ${inbox.length ? `<div class="section">Inbox</div><div class="group">${inbox.map(g => `<button class="cell" data-gift="${g.id}"><span class="inbox-ic">${ICON_GIFT}</span>
+      <span class="main"><div>${esc(g.name)}</div><div class="sub">From ${esc(g.fromName || 'a friend')} · ${giftSummary(g.kind, g.payload || {})}</div></span><span class="chev">${ICON_CHEV}</span></button>`).join('')}</div>` : ''}
+    ${friends.gifts.error === 'rules' ? `<div class="err">Sending workouts and plans needs the new Firebase rules. Open Firestore → Rules, paste the rules from Claude and click Publish.</div>` : ''}
     <div class="group code-card">
       <div class="lb-label">Your friend code</div>
       <div class="code">${data.settings.code ? esc(fmtCode(data.settings.code)) : '<span style="color:var(--label3)">······</span>'}</div>
@@ -2656,6 +2675,7 @@ function renderFriends() {
   };
   $('copyCode').onclick = async () => { try { await navigator.clipboard.writeText(fmtCode(data.settings.code)); $('copyLbl').textContent = 'Copied'; setTimeout(() => { const c = $('copyLbl'); if (c) c.textContent = 'Copy code'; }, 1500); } catch (e) {} };
   app.querySelectorAll('[data-acc]').forEach(b => b.onclick = () => openSheet({ type: 'acceptFriend', id: b.dataset.acc }));
+  app.querySelectorAll('[data-gift]').forEach(b => b.onclick = () => openSheet({ type: 'gift', id: b.dataset.gift }));
   app.querySelectorAll('[data-dec]').forEach(b => b.onclick = () => { const l = friends.links.find(x => x.id === b.dataset.dec); if (l) removeLink(l).catch(e => { friends.error = e.code || e.message; render(); }); });
   app.querySelectorAll('[data-friend]').forEach(b => b.onclick = () => go('friend', { friendLink: b.dataset.friend, prof: b.dataset.friend }));
 }
@@ -2677,6 +2697,7 @@ function renderFriend() {
     <header class="nav">${backBtn('Friends')}<span class="spacer"></span>${theyShare ? `<button class="circle glass" id="fRefresh" aria-label="Refresh">${svg('<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>', 18, 2.2)}</button>` : ''}</header>
     <div class="friend-head"><span class="avatar">${esc(initialOf(name))}</span><div class="large-title" style="margin:0">${esc(name)}</div></div>
     ${body}
+    ${giftHistoryHTML(l)}
     <div class="section">Your sharing</div>
     <div class="group"><label class="set-row"><span class="lbl">Share my training with ${esc(name)}</span>
       <input type="checkbox" class="switch" id="shareSw" ${iShare ? 'checked' : ''}></label></div>
@@ -2690,11 +2711,249 @@ function renderFriend() {
   };
   if ($('fRefresh')) $('fRefresh').onclick = () => { delete friends.cache[o]; render(); };
   wireProfileBody();
+  wireGiftHistory(l);
   if (theyShare && !c && !state.friendLoading) {
     state.friendLoading = true; state.friendErr = '';
     loadFriend(o).then(() => { state.friendLoading = false; if (state.views.friends === 'friend') render(); })
       .catch(e => { state.friendLoading = false; state.friendErr = isPerm(e) ? "Couldn't load — check that the new Firebase rules are published." : (e.code || e.message); if (state.views.friends === 'friend') render(); });
   }
+}
+
+/* ================= Sending workouts and plans to friends =================
+   A sent item is a document gifts/{id}: { from, to, fromName, toName, kind: 'workout'|'plan', name, payload, status, u }.
+   The payload is self-contained (exercises by name, with their details), so it doesn't depend on the sender's ids.
+   The recipient sees it in their Inbox and can Add (copies it in) or Decline; the sender sees the status.
+   Firestore rules: only friends can send, only the recipient can change the status. */
+const GIFT_MAX = { name: 60, instr: 2000, items: 60, days: 120 };   // safety limits on what's accepted from someone else
+const str = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
+
+// What gets sent
+function exPayload(id) {
+  const e = exById(id); if (!e) return null;
+  return { name: e.name, track: e.track, muscle: e.muscle || '', equip: e.equip || '', lib: e.lib || '', instructions: e.instructions || '', video: e.video || '' };
+}
+function workoutPayload(w) {
+  return { name: w.name, items: w.items.map(i => ({ ex: exPayload(i.exId), sets: i.sets })).filter(i => i.ex) };
+}
+function planPayload(p) {
+  const ids = [...new Set(p.days.map(d => d.workoutId).filter(id => woById(id)))];
+  return { name: p.name, weeks: p.weeks || 0, workouts: ids.map(id => workoutPayload(woById(id))), days: p.days.map(d => ({ w: ids.indexOf(d.workoutId) })) };
+}
+// Short description of an item, e.g. "Plan · 7-day rotation · 2 workouts" or "Workout · 5 exercises"
+function giftSummary(kind, payload) {
+  if (kind === 'plan') {
+    const days = (payload.days || []).length, wo = (payload.workouts || []).length;
+    return `Plan · ${days}-day rotation · ${plural(wo, 'workout')}${payload.weeks ? ` · ${plural(payload.weeks, 'week')}` : ''}`;
+  }
+  return `Workout · ${plural((payload.items || []).length, 'exercise')}`;
+}
+
+// Bringing a received item in. Everything from the other person is cleaned up first (lengths, numbers, known values).
+const TRACK_OK = [TRACK_A.map(t => t.v), TRACK_B.map(t => t.v)];
+function importExercise(x) {
+  const name = str(x && x.name, GIFT_MAX.name) || 'Exercise';
+  const lib = str(x.lib, 80);
+  const have = (lib && data.exercises.find(e => e.lib === lib)) || data.exercises.find(e => normName(e.name) === normName(name));
+  if (have) return have.id;
+  const track = Array.isArray(x.track) && TRACK_OK[0].includes(x.track[0]) && TRACK_OK[1].includes(x.track[1]) ? [x.track[0], x.track[1]] : ['weight', 'reps'];
+  const id = uid();
+  const rec = { id, name, track, instructions: str(x.instructions, GIFT_MAX.instr), video: ytId(x.video) ? str(x.video, 200) : '',
+    muscle: MUSCLES.some(m => m[0] === x.muscle) ? x.muscle : '', equip: EQUIP.some(m => m[0] === x.equip) ? x.equip : '' };
+  if (lib && libById(lib)) rec.lib = lib;
+  data.exercises.push(rec);
+  return id;
+}
+const uniqueName = (name, list, from) => list.some(x => x.name.toLowerCase() === name.toLowerCase()) ? `${name} (${from})` : name;
+function importWorkout(wp, from) {
+  const items = (Array.isArray(wp && wp.items) ? wp.items : []).slice(0, GIFT_MAX.items)
+    .filter(i => i && i.ex).map(i => ({ exId: importExercise(i.ex), sets: Math.max(1, Math.min(10, parseInt(i.sets, 10) || 3)) }));
+  const id = uid();
+  data.workouts.push({ id, name: uniqueName(str(wp && wp.name, GIFT_MAX.name) || 'Workout', data.workouts, from), items });
+  return id;
+}
+function importPlan(pp, from) {
+  const wids = (Array.isArray(pp.workouts) ? pp.workouts : []).slice(0, GIFT_MAX.days).map(w => importWorkout(w, from));
+  const days = (Array.isArray(pp.days) ? pp.days : []).slice(0, GIFT_MAX.days).map(d => ({ workoutId: d && wids[d.w] ? wids[d.w] : null }));
+  const id = uid();
+  data.plans.push({ id, name: uniqueName(str(pp.name, GIFT_MAX.name) || 'Plan', data.plans, from), weeks: Math.max(0, Math.min(52, parseInt(pp.weeks, 10) || 0)), days: days.length ? days : [{ workoutId: null }] });
+  return id;
+}
+
+// Live lists of what you've received and sent
+function startGifts() {
+  const fb = cloud.fb, uid = cloud.user.uid;
+  friends.gifts = { in: [], out: [], seen: null, error: '' };
+  const onErr = e => { friends.gifts.error = isPerm(e) ? 'rules' : (e.code || e.message); if (state.tab === 'friends') render(); };
+  const col = fb.collection(cloud.db, 'gifts');
+  friends.giftUnsubs = [
+    fb.onSnapshot(fb.query(col, fb.where('to', '==', uid)), snap => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const g = friends.gifts;
+      // Something new arrived while the app is open: say so
+      if (g.seen) list.filter(x => x.status === 'pending' && !g.seen.has(x.id)).forEach(x =>
+        toast(`<span class="tic" style="background:var(--tint-soft);color:var(--tint)">${ICON_GIFT}</span><span>${esc(x.fromName || 'A friend')} sent you ${esc(x.name)}<small>Open Friends to add it</small></span>`));
+      g.seen = new Set(list.map(x => x.id));
+      g.in = list; g.error = '';
+      giftsChanged();
+    }, onErr),
+    fb.onSnapshot(fb.query(col, fb.where('from', '==', uid)), snap => {
+      friends.gifts.out = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      giftsChanged();
+    }, onErr),
+  ];
+}
+function stopGifts() { (friends.giftUnsubs || []).forEach(u => u()); friends.giftUnsubs = []; friends.gifts = { in: [], out: [], seen: null, error: '' }; }
+const pendingGifts = () => (friends.gifts ? friends.gifts.in.filter(g => g.status === 'pending').sort((a, b) => b.u - a.u) : []);
+function giftsChanged() {
+  renderDock();
+  const v = state.views.friends;
+  if (state.tab === 'friends' && (v === 'friends' || v === 'friend') && !state.sheet) render();
+  else if (state.sheet && state.sheet.type === 'gift') renderSheet();
+}
+
+// Send one item to one or more friends
+async function sendGift(kind, item, links) {
+  const fb = cloud.fb, me = cloud.user.uid;
+  const payload = kind === 'plan' ? planPayload(item) : workoutPayload(item);
+  const sends = links.map(l => fb.setDoc(fb.doc(cloud.db, 'gifts', uid()), {
+    from: me, to: otherOf(l), fromName: myName(), toName: nameOf(l), kind, name: str(item.name, GIFT_MAX.name) || (kind === 'plan' ? 'Plan' : 'Workout'),
+    payload, status: 'pending', u: Date.now(),
+  }));
+  await Promise.all(sends);
+}
+const whenSent = u => { const r = relDay(dk(new Date(u || Date.now()))); return r === 'Today' || r === 'Yesterday' ? r.toLowerCase() : `on ${r}`; };
+const sentToast = (name, links) => toast(`<span class="tic" style="background:var(--green-soft);color:var(--green)">${ICON_OK}</span><span>Sent ${esc(name)}<small>To ${links.map(l => esc(nameOf(l))).join(', ')}</small></span>`);
+const sendErrText = e => isPerm(e) ? 'Sending needs the new Firebase rules. Open Firestore → Rules, paste the rules from Claude and click Publish.' : `Couldn't send (${esc(e.code || e.message)}).`;
+
+function acceptGift(g) {
+  const from = str(g.fromName, 40) || 'friend';
+  let target;
+  if (g.kind === 'plan') target = { view: 'pView', planId: importPlan(g.payload || {}, from) };
+  else target = { view: 'wEdit', workoutId: importWorkout(g.payload || {}, from) };
+  save();
+  g.status = 'added';
+  cloud.fb.updateDoc(cloud.fb.doc(cloud.db, 'gifts', g.id), { status: 'added', u: Date.now() }).catch(() => {});
+  closeSheet();
+  // Open what was added in the Workouts tab
+  state.tab = 'workouts';
+  if (target.view === 'pView') { state.views.workouts = 'wList'; state.wSeg = 'plans'; go('pView', { planId: target.planId }); }
+  else { state.views.workouts = 'wList'; state.wSeg = 'workouts'; render(); }
+  toast(`<span class="tic" style="background:var(--green-soft);color:var(--green)">${ICON_OK}</span><span>${esc(g.name)} added<small>${g.kind === 'plan' ? 'Start it whenever you like' : 'It\'s in your workouts'}</small></span>`);
+}
+function declineGift(g) {
+  g.status = 'declined';
+  cloud.fb.updateDoc(cloud.fb.doc(cloud.db, 'gifts', g.id), { status: 'declined', u: Date.now() }).catch(() => {});
+  closeSheet();
+  render();
+}
+function unsendGift(g) {
+  friends.gifts.out = friends.gifts.out.filter(x => x.id !== g.id);
+  cloud.fb.deleteDoc(cloud.fb.doc(cloud.db, 'gifts', g.id)).catch(() => {});
+  render();
+}
+
+/* Sheet: pick friends to send a workout or plan to */
+function sheetSendTo(el) {
+  const s = state.sheet;
+  const item = s.kind === 'plan' ? planById(s.id) : (s.draft || woById(s.id));
+  if (!item) { closeSheet(); return; }
+  const accepted = cloud.user ? friends.links.filter(l => l.status === 'accepted').sort((a, b) => nameOf(a).localeCompare(nameOf(b))) : [];
+  s.picked = s.picked || [];
+  const body = !cloud.user
+    ? `<div class="group hero" style="margin-top:0"><p>Sign in and add a friend to send them ${s.kind === 'plan' ? 'plans' : 'workouts'}.</p></div><button class="primary" id="sSignIn">Sign in</button>`
+    : !accepted.length
+      ? `<div class="group"><div class="empty">No friends yet. Add someone in the Friends tab first.</div></div>`
+      : `<div class="group">${accepted.map(l => { const on = s.picked.includes(l.id); return `<button class="cell pick-row ${on ? 'on' : ''}" data-pick="${l.id}">
+          <span class="avatar sm">${esc(initialOf(nameOf(l)))}</span><span class="main">${esc(nameOf(l))}</span>
+          <span class="pick-dot" aria-hidden="true">${on ? ICON_CHECK : ''}</span></button>`; }).join('')}</div>
+        <div class="footnote">They get their own copy${s.kind === 'plan' ? ', with its workouts and exercises' : ' with its exercises'}. Changes you make later won't affect it.</div>
+        <div class="err" id="sendErr">${s.err || ''}</div>
+        <button class="primary" id="sGo" ${s.picked.length && !s.busy ? '' : 'disabled'}>${s.busy ? 'Sending…' : s.picked.length > 1 ? `Send to ${s.picked.length} friends` : 'Send'}</button>`;
+  el.innerHTML = sheetOpen('Send to a friend', `${closeBtn('sCancel')}<b>Send ${esc(item.name || (s.kind === 'plan' ? 'plan' : 'workout'))}</b><span></span>`, `
+    <div class="finish-sub" style="margin:0 8px 12px">${giftSummary(s.kind, s.kind === 'plan' ? planPayload(item) : workoutPayload(item))}</div>${body}`);
+  $('sCancel').onclick = () => closeSheet();
+  if ($('sSignIn')) $('sSignIn').onclick = () => openSheet({ type: 'signin' });
+  el.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
+    const id = b.dataset.pick; s.picked = s.picked.includes(id) ? s.picked.filter(x => x !== id) : [...s.picked, id]; s.err = ''; haptic(); renderSheet();
+  });
+  if ($('sGo')) $('sGo').onclick = () => {
+    const links = friends.links.filter(l => s.picked.includes(l.id));
+    s.busy = true; renderSheet();
+    sendGift(s.kind, item, links).then(() => { if (state.sheet === s) closeSheet(); sentToast(item.name, links); render(); })
+      .catch(e => { s.busy = false; s.err = sendErrText(e); if (state.sheet === s) renderSheet(); });
+  };
+}
+
+/* Sheet: from a friend's page, pick a plan or workout to send them */
+function sheetSendPick(el) {
+  const s = state.sheet, l = friends.links.find(x => x.id === s.link);
+  if (!l) { closeSheet(); return; }
+  const row = (kind, x, sub) => `<div class="set-row"><span class="main" style="display:block;min-width:0"><div>${esc(x.name)}</div><div class="sub">${sub}</div></span>
+    <button class="capsule tint-fill" data-send="${kind}:${x.id}" ${s.busy ? 'disabled' : ''}>Send</button></div>`;
+  el.innerHTML = sheetOpen('Send to ' + nameOf(l), `${closeBtn('sCancel')}<b>Send to ${esc(nameOf(l))}</b><span></span>`, `
+    ${data.plans.length ? `<div class="section">Plans</div><div class="group">${data.plans.map(p => row('plan', p, planSummary(p))).join('')}</div>` : ''}
+    ${data.workouts.length ? `<div class="section">Workouts</div><div class="group">${[...data.workouts].sort(byName).map(w => row('workout', w, plural(w.items.length, 'exercise'))).join('')}</div>` : ''}
+    ${!data.plans.length && !data.workouts.length ? '<div class="group"><div class="empty">You have no workouts or plans yet. Make some in the Workouts tab.</div></div>' : ''}
+    <div class="err">${s.err || ''}</div>`);
+  $('sCancel').onclick = () => closeSheet();
+  el.querySelectorAll('[data-send]').forEach(b => b.onclick = () => {
+    const [kind, id] = b.dataset.send.split(':');
+    const item = kind === 'plan' ? planById(id) : woById(id);
+    if (!item) return;
+    s.busy = true; renderSheet();
+    sendGift(kind, item, [l]).then(() => { if (state.sheet === s) closeSheet(); sentToast(item.name, [l]); render(); })
+      .catch(e => { s.busy = false; s.err = sendErrText(e); if (state.sheet === s) renderSheet(); });
+  });
+}
+
+/* Sheet: something a friend sent you — see what's in it, then Add or Decline */
+function sheetGift(el) {
+  const g = friends.gifts && friends.gifts.in.find(x => x.id === state.sheet.id);
+  if (!g) { closeSheet(); return; }
+  const p = g.payload || {};
+  const exLine = i => {
+    const nm = str(i.ex && i.ex.name, GIFT_MAX.name), isNew = !data.exercises.some(e => (i.ex.lib && e.lib === i.ex.lib) || normName(e.name) === normName(nm));
+    return `<div class="set-row"><span class="main">${esc(nm)}${isNew ? '<span class="badge" style="margin-left:8px">New</span>' : ''}</span><span class="detail" style="color:var(--label2)">${plural(parseInt(i.sets, 10) || 3, 'set')}</span></div>`;
+  };
+  const items = w => (Array.isArray(w.items) ? w.items : []).filter(i => i && i.ex);
+  let content;
+  if (g.kind === 'plan') {
+    const ws = Array.isArray(p.workouts) ? p.workouts : [];
+    content = `<div class="section">Rotation</div><div class="group">${(p.days || []).map((d, i) => { const w = ws[d.w];
+        return `<div class="set-row"><span class="main"><span class="daynum">${i + 1}</span>${w ? esc(str(w.name, GIFT_MAX.name)) : '<span style="color:var(--label2)">Rest</span>'}</span></div>`; }).join('')}</div>
+      ${ws.map(w => `<div class="section">${esc(str(w.name, GIFT_MAX.name))}</div><div class="group">${items(w).map(exLine).join('') || '<div class="empty">No exercises</div>'}</div>`).join('')}`;
+  } else content = `<div class="section">Exercises</div><div class="group">${items(p).map(exLine).join('') || '<div class="empty">No exercises</div>'}</div>`;
+  const newCount = new Set((g.kind === 'plan' ? (p.workouts || []).flatMap(items) : items(p)).map(i => i.ex)
+    .filter(x => !data.exercises.some(e => (x.lib && e.lib === x.lib) || normName(e.name) === normName(x.name))).map(x => normName(x.name))).size;
+  el.innerHTML = sheetOpen(g.name, `${closeBtn('sCancel')}<b>From ${esc(g.fromName || 'a friend')}</b><span></span>`, `
+    <div class="gift-head"><div class="gift-ic">${ICON_GIFT}</div><div class="large-title" style="margin:0;font-size:28px">${esc(g.name)}</div>
+      <div class="finish-sub">${giftSummary(g.kind, p)}<br>Sent ${whenSent(g.u)}</div></div>
+    ${content}
+    <div class="footnote">${newCount ? `${plural(newCount, 'exercise')} you don't have yet will be added to your exercises. ` : ''}Exercises you already have are reused.</div>
+    <button class="primary" id="gAdd">${g.kind === 'plan' ? 'Add plan' : 'Add to my workouts'}</button>
+    <button class="btn-tinted" id="gDecline" style="color:var(--red);background:var(--red-soft)">Decline</button>`);
+  $('sCancel').onclick = () => closeSheet();
+  $('gAdd').onclick = () => { haptic(); acceptGift(g); };
+  $('gDecline').onclick = () => declineGift(g);
+}
+
+// What you've sent to / received from one friend (friend page)
+function giftHistoryHTML(l) {
+  if (!friends.gifts) return '';
+  const o = otherOf(l);
+  const sent = friends.gifts.out.filter(g => g.to === o).sort((a, b) => b.u - a.u).slice(0, 8);
+  const got = friends.gifts.in.filter(g => g.from === o && g.status !== 'pending').sort((a, b) => b.u - a.u).slice(0, 5);
+  const badge = st => st === 'added' ? '<span class="badge ok">Added</span>' : st === 'declined' ? '<span class="badge">Declined</span>' : '<span class="badge">Waiting</span>';
+  return `<div class="section">Send to ${esc(nameOf(l))}</div>
+    <div class="group"><button class="cell action" id="sendPick">${svg('<path d="M4 12l16-8-6 16-2-7-8-1z"/>', 18, 2)}Send a workout or plan</button></div>
+    ${sent.length ? `<div class="group" style="margin-top:10px">${sent.map(g => `<div class="set-row"><span class="main" style="display:block;min-width:0"><div>${esc(g.name)}</div>
+      <div class="sub">${g.kind === 'plan' ? 'Plan' : 'Workout'} · sent ${whenSent(g.u)}</div></span>
+      <span style="display:flex;align-items:center;gap:6px">${badge(g.status)}${g.status === 'pending' ? `<button class="circle" data-unsend="${g.id}" aria-label="Unsend ${esc(g.name)}" style="width:32px;height:32px;color:var(--label2)">${ICON_X}</button>` : ''}</span></div>`).join('')}</div>` : ''}
+    ${got.length ? `<div class="footnote">From ${esc(nameOf(l))}: ${got.map(g => `${esc(g.name)} (${g.status === 'added' ? 'added' : 'declined'})`).join(', ')}.</div>` : ''}`;
+}
+function wireGiftHistory(l) {
+  if ($('sendPick')) $('sendPick').onclick = () => openSheet({ type: 'sendPick', link: l.id });
+  app.querySelectorAll('[data-unsend]').forEach(b => b.onclick = () => { const g = friends.gifts.out.find(x => x.id === b.dataset.unsend); if (g) unsendGift(g); });
 }
 
 /* ================= Profiles (yours and friends') =================
@@ -3136,7 +3395,7 @@ function renderSheet() {
   }
   el.hidden = false; document.body.classList.add('locked');
   ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration, signin: sheetSignin,
-     planDay: sheetPlanDay, planStart: sheetPlanStart, moveBack: sheetMoveBack,
+     planDay: sheetPlanDay, planStart: sheetPlanStart, moveBack: sheetMoveBack, sendTo: sheetSendTo, sendPick: sheetSendPick, gift: sheetGift,
      addFriend: sheetAddFriend, acceptFriend: sheetAcceptFriend })[state.sheet.type](el);
   animateSegs(el);
 }

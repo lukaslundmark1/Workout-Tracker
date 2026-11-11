@@ -10,6 +10,10 @@ service cloud.firestore {
         && d.muscle is string && d.muscle.size() <= 20 && d.equip is string && d.equip.size() <= 20
         && d.byName is string && d.byName.size() <= 60;
     }
+    function areFriends(a, b) {
+      let path = /databases/$(database)/documents/links/$(pair(a, b));
+      return exists(path) && get(path).data.status == 'accepted';
+    }
     // True if `owner` has accepted you as a friend and switched on "Share my training"
     function sharesWith(owner) {
       let path = /databases/$(database)/documents/links/$(pair(owner, me()));
@@ -42,6 +46,24 @@ service cloud.firestore {
       allow create: if signedIn() && validLib(request.resource.data);
       allow update: if signedIn() && resource.data.by == me() && validLib(request.resource.data);
       allow delete: if signedIn() && (resource.data.by == me() || isAdmin());
+    }
+
+    // Workouts and plans sent between friends. Only friends can send; only the recipient can mark it added/declined;
+    // either of you can delete it (unsend / clear).
+    match /gifts/{id} {
+      allow read: if signedIn() && (resource.data.to == me() || resource.data.from == me());
+      allow create: if signedIn()
+        && request.resource.data.from == me()
+        && request.resource.data.to is string && request.resource.data.to != me()
+        && areFriends(me(), request.resource.data.to)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.kind in ['workout', 'plan']
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60
+        && request.resource.data.payload is map;
+      allow update: if signedIn() && resource.data.to == me()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'u'])
+        && request.resource.data.status in ['added', 'declined'];
+      allow delete: if signedIn() && (resource.data.to == me() || resource.data.from == me());
     }
 
     // Friend links between two people (id = the two user ids, sorted, joined by _)
