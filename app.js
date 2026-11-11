@@ -312,7 +312,7 @@ function go(view, extra = {}) {
   syncTopbar();
   if (!g) return;
   document.querySelectorAll('.ghost').forEach(x => { if (x !== g) x.remove(); });
-  app.classList.remove('enter-up', 'under');
+  app.classList.remove('enter-up', 'under', 'tab-in');
   void app.offsetWidth;
   app.classList.add(dir === 'up' ? 'enter-up' : 'under');
   g.classList.add(dir === 'up' ? 'recede' : 'leave-down');
@@ -550,7 +550,9 @@ function renderDock() {
     tabScroll[state.tab] = window.scrollY;
     state.tab = t; state.pending = null; render(); window.scrollTo(0, tabScroll[t] || 0); syncTopbar();
     if (!reduceMotion()) {
+      // (cleared when done: a leftover tab-in would override the slide-up of the next screen opened, making it instant)
       app.classList.remove('tab-in'); void app.offsetWidth; app.classList.add('tab-in');
+      clearTimeout(app._tabIn); app._tabIn = setTimeout(() => app.classList.remove('tab-in'), 480);
       const nb = $('dock').querySelector('button.on'); if (nb) nb.classList.add('pop');
     }
   });
@@ -2467,7 +2469,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.30';
+const APP_VERSION = '0.30.1';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -3629,7 +3631,7 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
     state.views[state.tab] = backOf(state.views[state.tab]);
     state.pending = null;
     render();
-    app.classList.remove('enter-up', 'under');
+    app.classList.remove('enter-up', 'under', 'tab-in');
     app.style.transition = 'none'; app.style.transformOrigin = '50% 0';
     app.style.transform = 'scale(.94)'; app.style.opacity = '.5';
   }
@@ -3672,7 +3674,11 @@ const PULL_BACK = { summary: 'day', log: 'day', picker: 'day', calendar: 'day', 
 })();
 
 /* ================= Bottom sheets ================= */
-function openSheet(s) { state.sheet = s; state.pending = null; renderSheet(); }
+// The page behind a sheet stays where it was: typing in a sheet can make iOS shift the page to make room for the keyboard,
+// so its scroll position is put back when the keyboard goes away and when the sheet closes
+let sheetScroll = null;
+function openSheet(s) { if (!state.sheet) sheetScroll = window.scrollY; state.sheet = s; state.pending = null; renderSheet(); }
+const restoreSheetScroll = () => { if (sheetScroll !== null && Math.abs(window.scrollY - sheetScroll) > 2) window.scrollTo(0, sheetScroll); };
 function closeSheet() { state.sheet = null; state.pending = null; renderSheet(); }
 function renderSheet() {
   const el = $('sheet');
@@ -3689,13 +3695,24 @@ function renderSheet() {
       g.querySelectorAll('.wheel-scroll').forEach((w, i) => { w.scrollTop = wheels[i]; });
       setTimeout(() => g.remove(), SHEET_OUT_MS);
     }
-    el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); pullSync(); return;
+    el.hidden = true; el.innerHTML = ''; document.body.classList.remove('locked'); pullSync();
+    restoreSheetScroll(); sheetScroll = null;
+    return;
   }
+  // A sheet that's already open is redrawn in place (a chip or switch tapped inside it): it doesn't slide up again or jump back
+  // to its top. A different sheet replacing it starts at the top, also without sliding in again.
+  const prev = el.hidden ? null : el.querySelector('.sheet'), same = prev && el.dataset.type === state.sheet.type, top = same ? prev.scrollTop : 0;
   el.hidden = false; document.body.classList.add('locked');
   pullSync();
+  el.dataset.type = state.sheet.type;
   ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration, signin: sheetSignin,
      note: sheetNote, planDay: sheetPlanDay, planStart: sheetPlanStart, moveBack: sheetMoveBack, sendTo: sheetSendTo, sendPick: sheetSendPick, gift: sheetGift, signout: sheetSignOut, deleteAccount: sheetDeleteAccount,
      addFriend: sheetAddFriend, acceptFriend: sheetAcceptFriend })[state.sheet.type](el);
+  if (prev) {
+    const sh = el.querySelector('.sheet'), bd = el.querySelector('.backdrop');
+    if (sh) { sh.classList.add('still'); sh.scrollTop = top; }
+    if (bd) bd.classList.add('still');
+  }
   animateSegs(el);
 }
 const sheetOpen = (label, head, body) => `<div class="backdrop"></div><div class="sheet" role="dialog" aria-label="${esc(label)}"><div class="sheet-head">${head}</div>${body}</div>`;
@@ -3944,6 +3961,17 @@ document.addEventListener('visibilitychange', () => {
   saveSyncNow();
 });
 try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); if (!state.sheet) bgRender(); }); } catch (e) {}
+/* The keyboard: while you type, the tab bar (and the rest pill and page dots) step away like in iPhone apps, instead of riding on
+   top of the keyboard. Inside the iPhone app the keyboard plugin shrinks the app above the keyboard and says when it comes and
+   goes; in Safari, focus on a text field is the signal. When it goes away inside a sheet, the page behind is put back. */
+const typingField = el => !!el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !el.readOnly && !['checkbox', 'radio', 'file', 'date', 'button'].includes(el.type)));
+const setKb = on => { document.body.classList.toggle('kb-open', on); if (!on && state.sheet) restoreSheetScroll(); };
+document.addEventListener('focusin', e => { if (typingField(e.target)) setKb(true); });
+document.addEventListener('focusout', () => setTimeout(() => { if (!typingField(document.activeElement)) setKb(false); }, 80));
+window.addEventListener('keyboardWillShow', () => document.body.classList.add('kb-open'));
+window.addEventListener('keyboardWillHide', () => setKb(false));
+// Inside the app it shouldn't zoom like a web page (pinch or double-tap)
+if (NATIVE) { const vp = document.querySelector('meta[name=viewport]'); if (vp) vp.content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'; }
 
 /* ================= Offline support ================= */
 // The app opens from its own cache (instant, works offline). A new version installs in the background; if it's ready

@@ -70,7 +70,10 @@
              -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   label.hx input { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; visibility: hidden; }
   :disabled > label.hx { display: none; }   /* a greyed-out button doesn't tick */
-  button, .cell, .chip, .seg, #dock, #numpad, .week, .cal, .pdots, .stepper, .setrow .sn { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  /* Like an iPhone app: pressing and holding doesn't select text or pop up a callout, except where you type or might copy */
+  body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  input, textarea, .instr-text, .code { -webkit-user-select: text; user-select: text; }
+  input[readonly] { -webkit-user-select: none; user-select: none; }
   html, body { margin: 0; background: var(--bg); color: var(--label); }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; font-size: 17px; letter-spacing: -.01em;
@@ -270,6 +273,7 @@
     box-shadow: 0 20px 60px rgba(0,0,0,.25);
     animation: up var(--dur-sheet) var(--ease-sheet);
   }
+  #sheet .sheet.still, #sheet .backdrop.still { animation: none; }   /* redrawn in place: no second entrance */
   .sheet-ghost { position: fixed; inset: 0; z-index: 22; pointer-events: none; }
   .sheet-ghost .sheet { animation: sheetOut .5s var(--ease-soft) forwards; }
   .sheet-ghost .backdrop { animation: fadeOut .42s ease forwards; }
@@ -583,7 +587,7 @@
   .pdots { z-index: 10; }
 
   /* Tabs: the new tab settles in, its icon gives a small pop */
-  #app.tab-in { animation: tabIn .44s var(--ease-soft); }
+  #app.tab-in:not(.enter-up):not(.under) { animation: tabIn .44s var(--ease-soft); }   /* a screen sliding in always wins */
   @keyframes tabIn { from { opacity: 0; transform: translateY(10px) scale(.992); } }
   #dock button.pop svg { animation: iconPop .5s var(--bounce); }
   @keyframes iconPop { 0% { transform: scale(.78); } 55% { transform: scale(1.14); } 100% { transform: scale(1); } }
@@ -665,6 +669,9 @@
   #dock, #dockfade { transition: transform var(--dur-sheet) var(--ease-sheet), opacity .3s ease; }
   body.np-open #dock { transform: translateX(-50%) translateY(140%); opacity: 0; pointer-events: none; }
   body.np-open #dockfade { opacity: 0; }
+  /* Typing: the tab bar, rest pill and page dots step away while the keyboard is up */
+  body.kb-open #dock { transform: translateX(-50%) translateY(140%); opacity: 0; pointer-events: none; }
+  body.kb-open #dockfade, body.kb-open #rest, body.kb-open .pdots { opacity: 0; pointer-events: none; }
   #numpad { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; border: .5px solid var(--sep); }
   @media (prefers-color-scheme: dark) { :root[data-theme="system"] #numpad { background: #1c1c1e; } :root[data-theme="system"] .npk:not(.fn) { background: #3a3a3c; } }
   :root[data-theme="dark"] #numpad { background: #1c1c1e; }
@@ -700,6 +707,6 @@
 <nav id="dock" class="glass" aria-label="Navigation"></nav>
 <div id="sheet" hidden></div>
 
-<script src="app.js?v=115f38a52c"></script>
+<script src="app.js?v=b35556af6a"></script>
 </body>
 </html>

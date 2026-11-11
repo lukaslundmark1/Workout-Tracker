@@ -13,6 +13,12 @@
     "scrollEnabled": true
   },
   "plugins": {
-    "StatusBar": { "overlaysWebView": true }
+    "StatusBar": {
+      "overlaysWebView": true
+    },
+    "Keyboard": {
+      "resize": "native",
+      "resizeOnFullScreen": true
+    }
   }
 }

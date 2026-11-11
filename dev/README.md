@@ -24,6 +24,7 @@ Set `window.__failCommit = true` to make batch writes fail like a rules rejectio
 - `test-schedule.py`: Upper/Lower plan scenarios for "Move back a day".
 - `test-numpad.py`: the number pad (typing, ±, Next, ticking, editing a done set, hardware keys).
 - `test-gestures.py [port]`: simulated finger drags: pull down to close a screen and a sheet, swipe exercises and days.
+- `test-motion.py [port]`: opening a screen still slides up after switching tabs; tapping inside an open sheet keeps it in place.
 
 ## Performance tools
 - `perf.py [port] [throttle] [days]`: seeds ~2 years of training (10,000 sets; `days` sets how much), then times every

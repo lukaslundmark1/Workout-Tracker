@@ -111,6 +111,15 @@ Lukas asked for a free way to have it as a real iOS app (for real haptics). Opti
 - iPhone only, portrait only, plain launch screen in the system grouped background colour (matches the app in light and dark), icon redrawn at 1024 px.
 - Not testable here (no Mac/iPhone): the Xcode build, real haptics, offline inside the app, sharing a backup file from inside the app. Tested in the browser with a stand-in bridge: each action calls the right native haptic, status bar follows the theme, no errors; web test suite unchanged.
 
+## Fixes after the first days in the iPhone app (v0.30.1, 2026-11-11)
+Lukas: "Works. Lots of bugs." From now on the app is **iOS first** (the native app), the web page second.
+- **Slide-up became instant after switching tabs:** the tab-switch animation class (`tab-in`) was never removed, and `#app.tab-in` out-ranked `.enter-up`/`.under`, so every later screen appeared instantly. It's now removed when done, `go()` clears it, and the CSS lets a sliding screen win.
+- **New Exercise sheet "shoots up, scroll down a lot":** every tap inside an open sheet (a chip, a switch) redrew it, replaying its slide-in from below and resetting its scroll to the top. An open sheet now redraws in place (`.still`, scroll kept); a different sheet replacing it starts at the top without sliding in again.
+- **Keyboard:** the native app has `@capacitor/keyboard` with `resize: native` (the app shrinks above the keyboard instead of iOS shifting the page; the keyboard's toolbar is hidden). While typing, the tab bar, rest pill and page dots step away (`body.kb-open`, from focus in Safari and from the plugin's keyboard events in the app). The page behind a sheet goes back to where it was when the keyboard closes and when the sheet closes.
+- **Feels less like a web page:** pressing and holding no longer selects text or pops up callouts (except in fields, instructions and the friend code); inside the app, pinch and double-tap zoom are off.
+- dev/test-motion.py checks both reported bugs.
+- The native project changed (new plugin), so Lukas rebuilds once: fresh ZIP → `npm install`, `npx cap sync ios`, `npx cap open ios`, set the Team again, ▶.
+
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.
 - Push: diff each record's hash against what was last synced, send in batches, debounced 600 ms.

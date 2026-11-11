@@ -5,11 +5,11 @@ Read this first, then `docs/DECISIONS.md` (the full feature and design history; 
 This project was built in claude.ai sessions up to v0.26 and moved to Claude Code on 2026-11-11. Everything you need is in this repo; nothing from those sessions (project docs, preview page) carries over.
 
 ## What this is
-A workout tracker and planner PWA for **Lukas** (the owner), his girlfriend and friends. iPhone first, made to look and feel like a native Apple app. Plain JavaScript with no framework and no npm dependencies for the app itself. The only build step is `build.py`. The backend is a free Firebase project.
+A workout tracker and planner for **Lukas** (the owner), his girlfriend and friends, made to look and feel like a native Apple app. **Since 2026-11-11 it is iOS first:** the main way Lukas uses it is the native iPhone app in `native/` (which loads this same web app); the web/PWA version comes second. Design, test and judge every change for the iPhone app first. Plain JavaScript with no framework and no npm dependencies for the app itself. The only build step is `build.py`. The backend is a free Firebase project.
 
 - Repo: `lukaslundmark1/Workout-Tracker`, branch `main`, every file at the root. Pushing to `main` deploys it.
 - Live site (GitHub Pages): https://lukaslundmark1.github.io/Workout-Tracker/
-- Current version: **v0.30** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
+- Current version: **v0.30.1** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
 - Firebase project `workout-tracker-705ae`, free Spark plan. Auth is Google + email/password; Firestore is in europe-north1. Lukas changes console settings himself. Tell him exactly what to click.
 
 ## How Lukas works (important)
