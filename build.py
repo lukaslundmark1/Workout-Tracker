@@ -5,7 +5,7 @@
   an old script with a new page, and lists it in sw.js for offline use.
 - Checks the Firebase bundle file referenced by app.js exists and is listed in sw.js.
 - Checks the Content-Security-Policy is still in index.html (it blocks any script that isn't the app's own).
-- Bumps the service worker cache name so installed apps pick up the new version.
+- Bumps the service worker cache name so installed apps pick up the new version (run it once per deploy).
 """
 import hashlib, pathlib, re, sys
 
@@ -34,8 +34,7 @@ if n != 1:
 m = re.search(r"const CACHE = 'tt-v(\d+)';", sws)
 if not m:
     sys.exit('sw.js: CACHE name not found')
-if f'app.js?v={v}' not in sw.read_text() or html != index.read_text():   # bump when the code or the page changed
-    sws = sws.replace(m.group(0), f"const CACHE = 'tt-v{int(m.group(1)) + 1}';")
+sws = sws.replace(m.group(0), f"const CACHE = 'tt-v{int(m.group(1)) + 1}';")   # every build: installed apps pick up any change
 
 index.write_text(html)
 sw.write_text(sws)

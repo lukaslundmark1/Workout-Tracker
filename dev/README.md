@@ -21,5 +21,9 @@ The mock signs `lukas@x.com` (password `secret1`) in as uid `u1`. In the page yo
 - `screenshots.py <tag> light,dark`: screenshots of all main screens with realistic seeded data into `shots/`.
 - `test-send.py`: end-to-end sending/receiving of workouts and plans (mock server).
 - `test-schedule.py`: Upper/Lower plan scenarios for "Move back a day".
+- `test-numpad.py`: the number pad (typing, ±, Next, ticking, editing a done set, hardware keys).
+
+Set fields are readonly (the app has its own number pad), so Playwright `.fill()` on `.w`/`.r` fails. Set them with
+`loc.evaluate("(e,v)=>{e.value=v;e.dispatchEvent(new Event('input'))}", "80")` or tap the pad keys `#numpad [data-k="8"]`.
 
 Background servers get killed between turns in Claude sessions; start them in the same command as the test.

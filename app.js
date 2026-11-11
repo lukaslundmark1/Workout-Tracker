@@ -156,6 +156,7 @@ function render() {
   renderSheet();
   animateSegs();
   polish();
+  padAfterRender();
   state.justTicked = null;
 }
 const DEPTH = { day: 0, wList: 0, eList: 0, friends: 0, settings: 0, summary: 1, log: 1, picker: 1, calendar: 1, eDetail: 1, wEdit: 1, pView: 1, pEdit: 2, history: 2, friend: 1, me: 1, pWorkouts: 2, pWorkout: 3, fEx: 4, lib: 2 };
@@ -655,8 +656,8 @@ function logBodyHTML(m) {
     const just = s && state.justTicked === s.id;
     rows += `<div class="setrow ${s ? 'done' : ''} ${just ? 'just' : ''}" data-i="${i}">
       <span class="sn">${i + 1}${s && pr && pr.set.id === s.id ? '<span class="pr-mini">PR</span>' : ''}</span>
-      <input class="w" inputmode="decimal" autocomplete="off" aria-label="Set ${i + 1} weight in ${U()}" value="${esc(v.w)}" placeholder="${U()}">
-      <input class="r" inputmode="numeric" autocomplete="off" aria-label="Set ${i + 1} reps" value="${esc(v.r)}" placeholder="reps">
+      <input class="w" readonly inputmode="none" tabindex="-1" autocomplete="off" aria-label="Set ${i + 1} weight in ${U()}" value="${esc(v.w)}" placeholder="${U()}">
+      <input class="r" readonly inputmode="none" tabindex="-1" autocomplete="off" aria-label="Set ${i + 1} reps" value="${esc(v.r)}" placeholder="reps">
       <button class="check" aria-label="${s ? 'Undo' : 'Complete'} set ${i + 1}"><span class="ring">${s ? ICON_CHECK : ''}</span></button>
     </div>`;
   }
@@ -747,7 +748,9 @@ function renderLog() {
     const wIn = row.querySelector('.w'), rIn = row.querySelector('.r');
     const done = bySlot[i];
     [wIn, rIn].forEach(inp => {
-      inp.addEventListener('focus', () => inp.select());
+      // Tapping a field opens the app's number pad (the field itself never takes focus, so no iPhone keyboard)
+      inp.addEventListener('pointerdown', e => { e.preventDefault(); padOpen(ex.id, i, inp === wIn ? 'w' : 'r'); });
+      inp.addEventListener('focus', () => { inp.blur(); padOpen(ex.id, i, inp === wIn ? 'w' : 'r'); });
       inp.addEventListener('input', () => {
         inp.classList.remove('bad');
         if (!done) drafts[i] = { w: wIn.value, r: rIn.value };
@@ -760,6 +763,7 @@ function renderLog() {
       });
     });
     row.querySelector('.check').onclick = () => {
+      if (np) { padCommit(); if (np.i === i) { np.fresh = true; if (!done) { const nx = i + 1; np = nx < n ? { ...np, i: nx, field: 'w' } : null; if (!np) padClose(); } } }
       if (done) {
         drafts[i] = { w: W(done.weight), r: String(done.reps) };
         data.sets = data.sets.filter(s => s.id !== done.id);
@@ -790,6 +794,124 @@ function renderLog() {
     };
   });
 }
+
+/* ================= Number pad for weight and reps =================
+   The iPhone keyboard in a web app always comes with a bar of arrows and ✓, and guesses at AutoFill.
+   So the set fields don't open it: tapping one slides up this pad instead. The fields stay real <input>s
+   (readonly, never focused), and every change goes through their normal 'input' / 'change' events. */
+let np = null;   // { exId, i, field: 'w' | 'r', fresh }
+const padInput = () => np && app.querySelector(`#pager .setrow[data-i="${np.i}"] .${np.field}`);
+const padRows = () => app.querySelectorAll('#pager .setrow').length;
+function padEl() {
+  let el = $('numpad');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'numpad'; el.className = 'glass'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Number pad');
+    document.body.appendChild(el);
+    el.addEventListener('pointerdown', e => e.preventDefault());       // keeps taps on the pad from stealing anything
+    el.addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (b) padKey(b.dataset.k); });
+  }
+  return el;
+}
+function padOpen(exId, i, field) {
+  const was = np;
+  if (was && (was.i !== i || was.field !== field)) padCommit();
+  np = { exId, i, field, fresh: true };
+  if (!was) haptic();
+  padDraw();
+  const el = padEl();
+  if (!el.classList.contains('on')) { el.classList.remove('off'); void el.offsetWidth; el.classList.add('on'); document.body.classList.add('np-open'); }
+  padReveal();
+}
+function padClose() {
+  if (!np) return;
+  padCommit();
+  np = null;
+  document.body.classList.remove('np-open');
+  const el = $('numpad'); if (el) { el.classList.remove('on'); el.classList.add('off'); }
+  app.querySelectorAll('.setrow input.active').forEach(x => x.classList.remove('active', 'fresh'));
+}
+// Leaving a field: a finished set saves its edited numbers (the field's own 'change' handler)
+function padCommit() { const inp = padInput(); if (inp && inp.dataset.dirty) { delete inp.dataset.dirty; inp.dispatchEvent(new Event('change')); } }
+// Keep the field you're typing in visible above the pad
+function padReveal() {
+  const inp = padInput(), el = $('numpad'); if (!inp || !el) return;
+  const row = inp.closest('.setrow').getBoundingClientRect(), limit = window.innerHeight - el.offsetHeight - 14;
+  if (row.bottom > limit) window.scrollBy({ top: row.bottom - limit, behavior: reduceMotion() ? 'auto' : 'smooth' });
+  else if (row.top < 70) window.scrollBy({ top: row.top - 70, behavior: reduceMotion() ? 'auto' : 'smooth' });
+}
+const STEP = () => (isImp() ? 5 : 2.5);
+function padSet(v) {
+  const inp = padInput(); if (!inp) return;
+  inp.value = v; inp.dataset.dirty = '1';
+  inp.classList.remove('bad');
+  inp.dispatchEvent(new Event('input'));
+}
+function padKey(k) {
+  const inp = padInput(); if (!np || !inp) return padClose();
+  const isW = np.field === 'w';
+  let v = np.fresh ? '' : inp.value;
+  if (k === 'done') return padClose();
+  if (k === 'next') return padNext();
+  if (k === 'w' || k === 'r') return padOpen(np.exId, np.i, k);
+  haptic();
+  if (k === 'plus' || k === 'minus') {
+    const cur = isW ? parseW(inp.value) : parseR(inp.value), base = isNaN(cur) ? 0 : cur;
+    const next = Math.max(0, base + (k === 'plus' ? 1 : -1) * (isW ? STEP() : 1));
+    padSet(isW ? String(Math.round(next * 100) / 100) : String(Math.max(isW ? 0 : 1, Math.round(next))));
+    np.fresh = false; return padDraw();
+  }
+  if (k === 'back') v = v.slice(0, -1);
+  else if (k === '.') { if (!isW || v.includes('.')) return; v = (v || '0') + '.'; }
+  else { if (v === '0') v = ''; if (v.replace('.', '').length >= (isW ? 5 : 3) || (v.includes('.') && v.split('.')[1].length >= 2)) return; v += k; }
+  np.fresh = false;
+  padSet(v);
+  padDraw();
+}
+// Weight → reps of the same set → weight of the next set → … → done
+function padNext() {
+  if (np.field === 'w') return padOpen(np.exId, np.i, 'r');
+  if (np.i + 1 < padRows()) return padOpen(np.exId, np.i + 1, 'w');
+  padClose();
+}
+function padDraw() {
+  if (!np) return;
+  const el = padEl(), inp = padInput(), isW = np.field === 'w';
+  app.querySelectorAll('.setrow input.active').forEach(x => x.classList.remove('active', 'fresh'));
+  if (inp) inp.classList.add('active'), inp.classList.toggle('fresh', np.fresh && !!inp.value);
+  const last = np.field === 'r' && np.i + 1 >= padRows();
+  const shown = inp && inp.value ? `${esc(inp.value)}<small>${isW ? U() : (inp.value === '1' ? 'rep' : 'reps')}</small>` : `<span class="ph">${isW ? U() : 'reps'}</span>`;
+  const key = (k, label, cls = '') => `<button class="npk ${cls}" data-k="${k}" aria-label="${label}">${label}</button>`;
+  el.innerHTML = `
+    <div class="np-top"><span class="np-where">Set ${np.i + 1}</span>
+      <span class="np-seg" role="tablist"><button class="${isW ? 'on' : ''}" data-k="w" role="tab" aria-selected="${isW}">${U()}</button><button class="${isW ? '' : 'on'}" data-k="r" role="tab" aria-selected="${!isW}">Reps</button></span>
+      <button class="np-next" data-k="next">${last ? 'Done' : np.field === 'w' ? 'Reps ›' : 'Next set ›'}</button></div>
+    <div class="np-val"><button class="np-step" data-k="minus" aria-label="Minus ${isW ? STEP() + ' ' + U() : '1 rep'}">−${isW ? STEP() : 1}</button>
+      <span class="np-num" aria-live="polite">${shown}</span>
+      <button class="np-step" data-k="plus" aria-label="Plus ${isW ? STEP() + ' ' + U() : '1 rep'}">+${isW ? STEP() : 1}</button></div>
+    <div class="np-keys">${['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => key(d, d)).join('')}
+      ${isW ? key('.', '.', 'fn') : `<button class="npk fn" data-k="done" aria-label="Hide number pad">${svg('<path d="M6 9l6 6 6-6"/>', 22, 2.4)}</button>`}${key('0', '0')}
+      <button class="npk fn" data-k="back" aria-label="Delete">${svg('<path d="M21 6H9l-6 6 6 6h12z"/><path d="M17 10l-4 4M13 10l4 4"/>', 22, 1.9)}</button></div>`;
+}
+// Called after every screen draw: the pad follows the redrawn fields, or closes if you left the exercise
+function padAfterRender() {
+  if (!np) return;
+  if (state.tab !== 'today' || state.views.today !== 'log' || state.logExId !== np.exId || state.sheet || !padInput()) {
+    padClose(); return;
+  }
+  padDraw();
+}
+// Tapping anywhere outside the pad and the set fields puts the pad away
+document.addEventListener('pointerdown', e => {
+  if (!np || e.target.closest('#numpad, .setrow input, .check, #sheet')) return;
+  padClose();
+}, true);
+// A hardware keyboard still works
+document.addEventListener('keydown', e => {
+  if (!np || e.metaKey || e.ctrlKey) return;
+  const map = { Backspace: 'back', Enter: 'next', Tab: 'next', Escape: 'done', ',': '.', '.': '.', ArrowUp: 'plus', ArrowDown: 'minus' };
+  const k = /^[0-9]$/.test(e.key) ? e.key : map[e.key];
+  if (k) { e.preventDefault(); padKey(k); }
+});
 
 /* ================= Personal records ================= */
 // A day's best set is a PR when its estimated 1RM beats every earlier day for that exercise.
@@ -1996,7 +2118,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.24';
+const APP_VERSION = '0.25';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
