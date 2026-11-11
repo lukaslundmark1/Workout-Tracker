@@ -127,6 +127,9 @@ Lukas sent a screen recording: swiping quickly back and forth between days made 
 - **Header steadied:** the Today button only shows when you're looking at another week (in this week today is in the strip, in red). Before, it popped in and out, and the month name shortened, on every swipe away from or back to today.
 - dev/test-swipe.py covers fast swiping.
 
+## 120 Hz in the iPhone app (native shell, 2026-11-11)
+Lukas: the app feels like 60 fps, not 120. Cause: WebKit draws web content inside apps at about 60 fps even on ProMotion screens (the WebKit setting `PreferPageRenderingUpdatesNear60FPSEnabled`; Safari's own feature flag doesn't apply to apps). Fix, in `native/ios/App/App/AppDelegate.swift`: `AppViewController` (a `CAPBridgeViewController` subclass, set as the custom class in Main.storyboard) switches that setting off through WebKit's private `_features` / `_setEnabled:forFeature:` before the web view is created, guarded so it does nothing if the setting is missing. Info.plist also has `CADisableMinimumFrameDurationOnPhone` (lets the app's native parts run above 60 Hz). Private API is fine here because the app is installed from Xcode, not the App Store; it would need rethinking for App Store/TestFlight. Another app measured 60 → 120 rAF/s on iOS 26.5 with the same switch. Not testable here (no Mac/iPhone): needs a rebuild in Xcode; Xcode's log prints "Training: drawing at the screen's full refresh rate" when it worked.
+
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.
 - Push: diff each record's hash against what was last synced, send in batches, debounced 600 ms.

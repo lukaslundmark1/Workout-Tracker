@@ -58,3 +58,4 @@ That's it: your data stays. If you miss it, the app just won't open until you do
 - After changing anything here: `npx cap sync ios`, rebuild in Xcode. Generated files (`ios/App/App/public`, the copied config)
   are git-ignored and recreated by `cap sync`.
 - App icon: `ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png` (1024×1024, redrawn from icon-512.png).
+- 120 Hz: `AppViewController` in `ios/App/App/AppDelegate.swift` (the storyboard's custom class) turns off WebKit's 60 fps cap (`PreferPageRenderingUpdatesNear60FPSEnabled`, private API, guarded) before the web view is made; Info.plist has `CADisableMinimumFrameDurationOnPhone`. The Xcode log says "Training: drawing at the screen's full refresh rate" when it worked.
