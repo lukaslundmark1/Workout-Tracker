@@ -91,6 +91,7 @@ Start the local servers in the same command as the tests if your shell kills bac
 The claude.ai sessions used a preview page; that doesn't exist here. Instead, serve the repo on this machine (`python3 -m http.server 8765 --bind 0.0.0.0`) and give him `http://<this computer's local IP>:8765` to open in Safari on his iPhone, on the same Wi-Fi. Sign-in won't work there, because only the github.io domain is authorised in Firebase, but everything else does. If he wants to test on the real installed app, push and he reopens it.
 
 ## Open items and ideas he hasn't decided on
+- **Fully native SwiftUI rebuild (experiment):** Lukas wants to see what it would be like. Everything needed to start is in `docs/NATIVE-REBUILD.md` (new folder `ios-native/`; same Firebase data format; don't touch the web app or `native/`).
 - Ask how v0.26 (the big performance update) feels on his iPhone: opening, swiping between exercises, ticking sets.
 - Not confirmed: the admin doc `admins/<his uid>` in Firestore (lets him remove anyone's shared database entries), and the account hardening steps (2-step verification on Google and GitHub, restricting the Firebase API key to the github.io site, etc.; see DECISIONS.md → Security).
 - Coaching switch: a friend can add workouts to your calendar (per-friend permission, off by default).
