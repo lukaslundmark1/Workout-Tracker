@@ -17,7 +17,7 @@ VIEWS = [("today","day",{}),("today","log",{"logExId":"bp"}),("today","history",
   ("friends","friends",{}),("friends","me",{"prof":"me"}),("friends","pWorkouts",{"prof":"me"}),("friends","pWorkout",{"prof":"me","pwDate":"__past__"}),("friends","fEx",{"prof":"me","friendEx":"bp","stat":"e1rm"}),
   ("settings","settings",{})]
 SHEETS = ["{type:'exForm', exId:'bp'}","{type:'exForm', exId:null, name:'New one'}","{type:'addToWorkout', q:''}","{type:'duration', k: todayKey()}","{type:'signin'}",
-  "{type:'planDay', index:0}","{type:'planStart', planId:'p1'}","{type:'moveBack', k: dk(addDays(new Date(),1))}","{type:'setCount', index:0}","{type:'sendTo', kind:'plan', id:'p1'}","{type:'sendTo', kind:'workout', id:'wu'}"]
+  "{type:'planDay', index:0}","{type:'planStart', planId:'p1'}","{type:'moveBack', k: dk(addDays(new Date(),1))}","{type:'setCount', index:0}","{type:'sendTo', kind:'plan', id:'p1'}","{type:'sendTo', kind:'workout', id:'wu'}","{type:'note', exId:'bp'}"]
 async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch(**({'executable_path': '/usr/bin/google-chrome'} if __import__('os').path.exists('/usr/bin/google-chrome') else {}))

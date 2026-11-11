@@ -184,7 +184,8 @@ const ICON_CHEV = svg('<path d="M9 6l6 6-6 6"/>', 14, 2.6);
 const ICON_CAL = svg('<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>');
 const ICON_SEARCH = svg('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>', 17, 2.2);
 const ICON_CHECK = svg('<path d="M6 12.5l4 4 8-9"/>', 18, 3);
-const ICON_TODAY = svg('<rect x="3.5" y="4.5" width="17" height="16" rx="3"/><path d="M3.5 9.5h17M8 2.5v4M16 2.5v4"/><circle cx="12" cy="15" r="1.6" fill="currentColor"/>', 26, 1.7);
+// Today's tab: a page showing today's date, like the iPhone Calendar app icon (so it doesn't look like the calendar button)
+const iconToday = () => svg(`<rect x="3.5" y="3.5" width="17" height="17" rx="4.5"/><path d="M3.5 8.5h17"/><text x="12" y="17.6" text-anchor="middle" font-size="9.5" font-weight="700" fill="currentColor" stroke="none" style="font-family:var(--rounded)">${new Date().getDate()}</text>`, 26, 1.7);
 const ICON_WORKOUTS = svg('<rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/>', 26, 1.7);
 const ICON_FRIENDS = svg('<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9.5" r="2.6"/><path d="M16.5 14.6c2.4.2 4 1.7 4.5 4.4"/>', 26, 1.7);
 const ICON_SETTINGS = svg('<circle cx="12" cy="12" r="3"/><path d="M12 2.8l1.6 2.3 2.8-.4.9 2.7 2.5 1.3-.6 2.7 1.6 2.3-2.1 1.9.1 2.8-2.7.6-1.2 2.5-2.6-1-2.6 1-1.2-2.5-2.7-.6.1-2.8-2.1-1.9 1.6-2.3-.6-2.7 2.5-1.3.9-2.7 2.8.4z"/>', 26, 1.6);
@@ -203,6 +204,7 @@ const okBtn = (id, label = 'Save') => `<button class="circle prominent" id="${id
 const plusLead = `<span class="plus">${ICON_PLUS}</span>`;
 const ICON_TRASH = svg('<path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6"/>', 20, 1.9);
 const ICON_GRIP = svg('<path d="M5 9h14M5 15h14"/>', 20, 2.2);
+const ICON_NOTE = svg('<path d="M14.5 4.5l5 5L9 20H4v-5z"/><path d="M12.5 6.5l5 5"/>', 17, 2);
 const ICON_TIMER = svg('<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M9.5 2.5h5"/>', 18, 2);
 
 /* ================= State & routing ================= */
@@ -454,11 +456,11 @@ const haptic = (() => {
 let dockPos = null;
 function renderDock() {
   // Today stays in the middle
-  const tabs = [['friends', 'Friends', ICON_FRIENDS], ['workouts', 'Workouts', ICON_WORKOUTS], ['today', 'Today', ICON_TODAY], ['exercises', 'Exercises', ICON_EXERCISES], ['settings', 'Settings', ICON_SETTINGS]];
+  const tabs = [['friends', 'Friends', ICON_FRIENDS], ['workouts', 'Workouts', ICON_WORKOUTS], ['today', 'Today', iconToday()], ['exercises', 'Exercises', ICON_EXERCISES], ['settings', 'Settings', ICON_SETTINGS]];
   const dock = $('dock');
   const reqs = (typeof friends !== 'undefined' && cloud.user) ? friends.links.filter(l => l.status === 'pending' && l.from !== cloud.user.uid).length + pendingGifts().length : 0;
-  // Only redrawn when the selected tab or the badge changes (not on every screen update)
-  const sig = state.tab + '|' + reqs;
+  // Only redrawn when the selected tab, the badge or the date changes (not on every screen update)
+  const sig = state.tab + '|' + reqs + '|' + todayKey();
   if (dock.dataset.sig === sig && dock.firstChild) return;
   dock.dataset.sig = sig;
   dock.innerHTML = tabs.map(([t, label, icon]) => `<button data-tab="${t}" class="${state.tab === t ? 'on' : ''}" aria-label="${label}${t === 'friends' && reqs ? `, ${reqs} new` : ''}">${icon}${t === 'friends' && reqs ? `<span class="tab-badge">${reqs}</span>` : ''}<span>${label}</span></button>`).join('');
@@ -791,6 +793,8 @@ function logBodyHTML(m) {
       <span class="lb-sets">${prevK ? setsCompact(prevSets) : 'No earlier sessions'}</span></span>
       <span class="lb-more">History <span class="chev">${ICON_CHEV}</span></span>
     </button>
+    ${ex.note ? `<button class="note-row" id="noteBtn" aria-label="Note: ${esc(ex.note)}. Tap to edit">${ICON_NOTE}<span class="note-t">${esc(ex.note)}</span></button>`
+      : `<button class="note-add" id="noteBtn">${ICON_NOTE}Add a note</button>`}
     ${ex.instructions || vid ? `<details class="instr"><summary>Instructions</summary>
       ${ex.instructions ? `<div class="instr-text">${esc(ex.instructions)}</div>` : ''}
       ${vid ? `<a href="https://www.youtube.com/watch?v=${vid}" target="_blank" rel="noopener">Watch video on YouTube ↗</a>` : ''}
@@ -860,6 +864,7 @@ function renderLog() {
   if ($('finishHere')) $('finishHere').onclick = () => openFinish(k);
   if ($('addMore')) $('addMore').onclick = () => go('picker', { pickerQuery: '', pickerMode: 'exercises', anim: 'up' });
   $('history').onclick = () => go('history', { stat: 'e1rm' });
+  $('noteBtn').onclick = () => openSheet({ type: 'note', exId: ex.id });
   $('plus').onclick = () => { item.sets = n + 1; changed(); };
   $('minus').onclick = () => { if (!(n > 0 && !bySlot[n - 1])) return; item.sets = n - 1; delete drafts[n - 1]; changed(); };
 
@@ -1264,6 +1269,7 @@ const isRunning = k => { const s = dayOf(k).session; return !!(s && s.start && !
 // (Past days you're just filling in afterwards don't get a timer or a Finish button.)
 const canFinish = k => !isFinished(k) && (isRunning(k) || (k === todayKey() && hasSets(k)));
 const openFinish = k => openSheet({ type: 'duration', k });
+const LONG_GAP = 15 * 60000;   // a last set longer ago than this means the timer ran on after the workout
 function sheetDuration(el) {
   const st = state.sheet, k = st.k;
   const day = dayOf(k);
@@ -1273,10 +1279,15 @@ function sheetDuration(el) {
   const unticked = editing ? [] : untickedSets(k);
   const okUnticked = unticked.filter(u => u.ok);
   if (st.logRest === undefined) st.logRest = okUnticked.length > 0;
-  // Default duration: the timer, or (if it never ran) the time since the first logged set
+  // Default duration: the timer, or (if it never ran) the time since the first logged set.
+  // Forgot to press Finish? If the last ticked set was a while ago, the workout ends at that set instead of now.
   const firstTs = loggedToday.length ? Math.min(...loggedToday.map(x => x.ts)) : null;
-  const ms = s ? (s.end || Date.now()) - s.start : firstTs && k === todayKey() ? Date.now() - firstTs : 0;
+  const lastTs = loggedToday.length ? Math.max(...loggedToday.map(x => x.ts)) : null;
+  const ranLong = !editing && lastTs && Date.now() - lastTs > LONG_GAP && (!s || lastTs > s.start);
+  const endAt = editing ? s.end : ranLong ? lastTs : Date.now();
+  const ms = s ? endAt - s.start : firstTs && (k === todayKey() || ranLong) ? endAt - firstTs : 0;
   const mins = Math.max(0, Math.round(ms / 60000));
+  const hm = t => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   const nothing = !loggedToday.length && !(st.logRest && okUnticked.length);
   el.innerHTML = sheetOpen('Finish workout',
     `${closeBtn('sCancel')}<b>${editing ? 'Duration' : 'Finish workout'}</b>${okBtn('sSave', editing ? 'Save duration' : 'Finish workout')}`,
@@ -1287,7 +1298,9 @@ function sheetDuration(el) {
         <div class="footnote">Uses the weight and reps shown in each row.${unticked.length > okUnticked.length ? ` ${plural(unticked.length - okUnticked.length, 'set')} without numbers will be skipped.` : ''}</div>` : ''}
       ${nothing ? `<div class="footnote" style="color:var(--red)">No sets are logged, so this workout will show as empty. ${okUnticked.length ? 'Tick the sets you did, or log them above.' : 'Tick the sets you did first.'}</div>` : ''}
       <div class="section">Duration</div>` : ''}
-     <div class="finish-sub" style="margin:0 6px 4px">${s ? `Started ${new Date(s.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : "The timer wasn't running"} · adjust if needed</div>
+     <div class="finish-sub" style="margin:0 6px 4px">${ranLong
+       ? `${s ? `Started ${hm(s.start)} · ` : ''}ends at your last set, ${hm(lastTs)}`
+       : `${s ? `Started ${hm(s.start)}` : "The timer wasn't running"} · adjust if needed`}</div>
      <div class="group"><div class="wheels dur">
        ${wheelHTML('wH', HOUR_OPTS)}<span class="unit">h</span>${wheelHTML('wM', MIN_OPTS)}<span class="unit">min</span>
      </div></div>
@@ -1302,14 +1315,15 @@ function sheetDuration(el) {
     const total = (HOUR_OPTS[wheelIndex('wH')].v * 60 + MIN_OPTS[wheelIndex('wM')].v) * 60000;
     const d = ensureDay(k);
     if (!editing && st.logRest) {
-      let ts = Date.now();
+      let ts = ranLong ? lastTs + 1 : Date.now();
       okUnticked.forEach(u => {
         data.sets.push({ id: uid(), exId: u.exId, date: k, slot: u.slot, weight: fromU(u.w), reps: u.r, ts: ts++ });
         delete (state.drafts[u.exId + '|' + k] || {})[u.slot];
       });
     }
-    const end = s && s.end ? s.end : Date.now();
-    d.session = { start: end - total, end };
+    // A running timer keeps its start and the duration sets the end; otherwise the duration counts back from the end
+    if (s && !editing) d.session = { start: s.start, end: s.start + total };
+    else { const end = editing ? s.end : endAt; d.session = { start: end - total, end }; }
     save();
     state.sheet = null;
     if (editing) return render();
@@ -1599,6 +1613,7 @@ function renderExerciseDetail() {
     <header class="nav">${backBtn('Exercises')}<span class="spacer"></span><button class="capsule glass" id="edit">Edit</button></header>
     <div class="large-title">${esc(ex.name)}</div>
     ${progressHTML(ex.id)}
+    ${ex.note ? `<div class="section">Note</div><div class="group"><div class="instr-text" style="padding:12px 16px">${esc(ex.note)}</div></div>` : ''}
     <div class="section">Instructions</div>
     <div class="group">
       ${ex.instructions ? `<div class="instr-text" style="padding:12px 16px">${esc(ex.instructions)}</div>` : ''}
@@ -2350,7 +2365,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.27';
+const APP_VERSION = '0.28';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2954,6 +2969,7 @@ function cleanExercise(e) {
   const out = { id: cl.id(e.id), name: cl.text(e.name, 60).trim() || 'Exercise', track: cleanTrack(e.track), instructions: cl.text(e.instructions, 2000),
     video: ytId(e.video) ? cl.text(e.video, 200) : '', muscle: cl.oneOf(e.muscle, MUSCLES.map(m => m[0])), equip: cl.oneOf(e.equip, EQUIP.map(m => m[0])) };
   if (e.lib) out.lib = cl.text(e.lib, 80);
+  if (e.note) out.note = cl.text(e.note, NOTE_MAX);
   return out;
 }
 function cleanDay(d) {
@@ -3560,7 +3576,7 @@ function renderSheet() {
   el.hidden = false; document.body.classList.add('locked');
   pullSync();
   ({ exForm: sheetExForm, addToWorkout: sheetAddToWorkout, setCount: sheetSetCount, duration: sheetDuration, signin: sheetSignin,
-     planDay: sheetPlanDay, planStart: sheetPlanStart, moveBack: sheetMoveBack, sendTo: sheetSendTo, sendPick: sheetSendPick, gift: sheetGift, signout: sheetSignOut, deleteAccount: sheetDeleteAccount,
+     note: sheetNote, planDay: sheetPlanDay, planStart: sheetPlanStart, moveBack: sheetMoveBack, sendTo: sheetSendTo, sendPick: sheetSendPick, gift: sheetGift, signout: sheetSignOut, deleteAccount: sheetDeleteAccount,
      addFriend: sheetAddFriend, acceptFriend: sheetAcceptFriend })[state.sheet.type](el);
   animateSegs(el);
 }
@@ -3572,6 +3588,7 @@ function sheetExForm(el) {
   if (s.instructions === undefined) {
     s.name = s.name || (ex ? ex.name : '');
     s.instructions = ex ? ex.instructions : '';
+    s.note = ex ? ex.note || '' : '';
     s.video = ex ? ex.video : '';
     s.muscle = ex ? ex.muscle || '' : s.muscle || '';
     s.equip = ex ? ex.equip || '' : s.equip || '';
@@ -3593,6 +3610,8 @@ function sheetExForm(el) {
      <div class="chips wrap">${EQUIP.map(([k, n]) => `<button class="chip ${s.equip === k ? 'on' : ''}" data-fe="${k}">${n}</button>`).join('')}</div>
      <div class="section">Instructions <span class="opt">· optional</span></div>
      <div class="group"><textarea class="field-input" id="fInstr" rows="4" placeholder="Setup, cues, things to remember…"></textarea></div>
+     <div class="section">Note <span class="opt">· shows when you log it</span></div>
+     <div class="group"><textarea class="field-input" id="fNote" rows="2" maxlength="${NOTE_MAX}" placeholder="E.g. seat on 4"></textarea></div>
      <div class="section">Video <span class="opt">· optional</span></div>
      <div class="group"><input class="field-input" id="fVideo" inputmode="url" autocomplete="off" placeholder="YouTube link"></div>
      <div class="section">Exercise database</div>
@@ -3605,8 +3624,9 @@ function sheetExForm(el) {
      <div class="err" id="fErr"></div>
      ${ex ? `<div class="group" style="margin-top:28px"><button class="cell destructive ${state.pending === 'delEx' ? 'confirm' : ''}" id="sDel">${state.pending === 'delEx'
         ? `Tap again to delete${setCount ? ` (and ${plural(setCount, 'logged set')})` : ''}` : 'Delete Exercise'}</button></div>` : ''}`);
-  const fName = $('fName'), fInstr = $('fInstr'), fVideo = $('fVideo');
-  fName.value = s.name; fInstr.value = s.instructions; fVideo.value = s.video;
+  const fName = $('fName'), fInstr = $('fInstr'), fVideo = $('fVideo'), fNote = $('fNote');
+  fName.value = s.name; fInstr.value = s.instructions; fVideo.value = s.video; fNote.value = s.note;
+  fNote.oninput = () => s.note = fNote.value;
   fName.oninput = () => {
     const before = !!(s.name.trim() && libByName(s.name)), now = !!(fName.value.trim() && libByName(fName.value));
     s.name = fName.value;
@@ -3634,7 +3654,8 @@ function sheetExForm(el) {
     const fields = { name, track, instructions: s.instructions.trim(), video, muscle: s.muscle, equip: s.equip };
     if (ex) Object.assign(ex, fields);
     else { id = uid(); data.exercises.push({ id, ...fields }); }
-    const rec = exById(id);
+    const rec = exById(id), note = s.note.trim().slice(0, NOTE_MAX);
+    if (note) rec.note = note; else delete rec.note;
     if (s.sharedOwn && !sharing) { const own = lib.shared.find(x => x.id === rec.lib); if (own) removeFromLib(own); delete rec.lib; }
     else if (s.sharedOwn && sharing) {
       const own = lib.shared.find(x => x.id === rec.lib);
@@ -3662,6 +3683,26 @@ function sheetExForm(el) {
     if (state.draft) state.draft.items = state.draft.items.filter(i => i.exId !== ex.id);
     save(); state.sheet = null; go('eList');
   };
+}
+
+/* Sheet: an exercise's note ("seat on 4"), shown every time you log that exercise. Private: never sent to friends. */
+const NOTE_MAX = 200;
+function sheetNote(el) {
+  const s = state.sheet, ex = exById(s.exId);
+  if (!ex) { closeSheet(); return; }
+  if (s.text === undefined) s.text = ex.note || '';
+  el.innerHTML = sheetOpen('Note', `${closeBtn('sCancel')}<b>Note</b>${okBtn('sSave', 'Save note')}`, `
+    <div class="finish-sub" style="margin:0 8px 12px">${esc(ex.name)} · shows every time you do it</div>
+    <div class="group"><textarea class="field-input" id="nText" rows="4" maxlength="${NOTE_MAX}" placeholder="E.g. seat on 4, grip just outside the rings"></textarea></div>
+    ${ex.note ? `<button class="btn-tinted" id="nDel" style="color:var(--red);background:var(--red-soft)">Delete note</button>` : ''}`);
+  const t = $('nText');
+  t.value = s.text;
+  t.oninput = () => { s.text = t.value; };
+  t.focus(); t.setSelectionRange(t.value.length, t.value.length);   // straight away, so the iPhone keyboard comes up
+  const done = text => { const v = text.trim().slice(0, NOTE_MAX); if (v) ex.note = v; else delete ex.note; save(); closeSheet(); render(); };
+  $('sCancel').onclick = () => closeSheet();
+  $('sSave').onclick = () => done(s.text);
+  if ($('nDel')) $('nDel').onclick = () => done('');
 }
 
 const SET_OPTIONS = Array.from({ length: 10 }, (_, i) => ({ v: i + 1, label: `${i + 1}` }));

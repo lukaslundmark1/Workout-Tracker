@@ -89,6 +89,11 @@ Lukas asked Claude Code for a review of the whole app ("rebuild if you have to")
 - Review decisions: Lukas chose **exercise notes**, a **smarter finish time** and a **Today icon showing today's date** as next features. He does **not** see a white flash at launch in dark mode (no launch image needed). Not chosen for now: progress hint, muscle groups on the Exercises list.
 - Longer-term note: localStorage is limited to about 5 MB; with sync bookkeeping that's several years of heavy logging. Moving sets to IndexedDB is the fix if it ever gets close.
 
+## Notes, finish time, Today icon (v0.28, chosen by Lukas in the review)
+- **Exercise notes:** `exercise.note` (up to 200 characters), e.g. "seat on 4". Shown on the exercise's log screen under Last time (tap to edit in a small sheet; "Add a note" link when empty), editable in the exercise form, shown on the exercise's page in the Exercises tab. Private: not included when sending workouts/plans or sharing to the database. Kept in backups (`cleanExercise`).
+- **Smarter finish time:** if the last ticked set was more than 15 minutes ago, the Finish sheet ends the workout at that set ("Started 17:50 · ends at your last set, 18:42") instead of now. A running timer now keeps its start time and the duration sets the end (before, the end was always "now" and the start moved).
+- **Today tab icon:** a page showing today's date (like the iPhone Calendar app icon) instead of a calendar with a dot, so it no longer looks like the calendar button. The tab bar redraws when the date changes.
+
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.
 - Push: diff each record's hash against what was last synced, send in batches, debounced 600 ms.
@@ -186,7 +191,5 @@ Lukas asked Claude Code for a review of the whole app ("rebuild if you have to")
 ## Open questions
 - Has the admin doc `admins/<uid>` been set up? Have the account hardening steps been done?
 - Show muscle group / equipment on your own Exercises list, or filter it by them?
-- Finish sheet: suggest the last set's time when the timer clearly ran far past it?
 - More tracking options (time, distance, bodyweight, etc.)
-- The Today tab icon looks similar to the calendar button.
 - What friends can see (body weight later?)

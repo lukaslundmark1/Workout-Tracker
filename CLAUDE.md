@@ -9,7 +9,7 @@ A workout tracker and planner PWA for **Lukas** (the owner), his girlfriend and 
 
 - Repo: `lukaslundmark1/Workout-Tracker`, branch `main`, every file at the root. Pushing to `main` deploys it.
 - Live site (GitHub Pages): https://lukaslundmark1.github.io/Workout-Tracker/
-- Current version: **v0.27** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
+- Current version: **v0.28** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
 - Firebase project `workout-tracker-705ae`, free Spark plan. Auth is Google + email/password; Firestore is in europe-north1. Lukas changes console settings himself. Tell him exactly what to click.
 
 ## How Lukas works (important)
@@ -94,7 +94,5 @@ The claude.ai sessions used a preview page; that doesn't exist here. Instead, se
 - Not confirmed: the admin doc `admins/<his uid>` in Firestore (lets him remove anyone's shared database entries), and the account hardening steps (2-step verification on Google and GitHub, restricting the Firebase API key to the github.io site, etc.; see DECISIONS.md → Security).
 - Coaching switch: a friend can add workouts to your calendar (per-friend permission, off by default).
 - Muscle-group filter or labels on his own Exercises list.
-- Finish sheet: suggest the time of the last set when the timer clearly ran long.
 - More tracking types (time, distance, bodyweight).
-- The Today tab icon looks like the calendar icon.
 - What friends can see (body weight later?).
