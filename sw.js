@@ -1,9 +1,9 @@
 // Bump this when you deploy a new version so old caches are cleared.
-const CACHE = 'tt-v53';
+const CACHE = 'tt-v56';
 const ASSETS = [
   './',
   './index.html',
-  './app.js?v=b35556af6a',
+  './app.js?v=a3e40c70a4',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

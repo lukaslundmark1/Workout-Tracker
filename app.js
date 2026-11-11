@@ -705,7 +705,9 @@ function doToday(k) {
 function renderDay() {
   const logged = loggedDays();
   const tk = todayKey();
-  const showToday = dk(state.weekStart) !== dk(startOfWeek(new Date())) || state.selected !== tk;
+  // Today button: only when you're looking at another week (in this week, today is right there in the strip, in red).
+  // Showing it for every other day made the header change, and the month name shorten, on every swipe.
+  const showToday = dk(state.weekStart) !== dk(startOfWeek(new Date()));
   const weekHTML = ws => `<div class="week">${Array.from({ length: 7 }, (_, i) => {
     const k = dk(addDays(ws, i));
     const cls = ['day', k === tk && 'today', k === state.selected && 'sel'].filter(Boolean).join(' ');
@@ -1243,15 +1245,17 @@ function renderSummary() {
 // The target moves with your finger (you can pause mid-swipe); the neighbouring page peeks in from the side.
 // Let go past ~30% of the width, or flick, to turn the page; otherwise it springs back.
 function swipePager(surface, target, opts) {
-  let s = null;
+  // Pages are numbered from the one on screen: 0, next 1, 2, …, previous -1, -2, … (opts.peek(n) draws page n, or null at
+  // the end; opts.commit(n) moves to it). The row of pages follows your finger; quick swipes in a row go on to further pages.
+  // s: the swipe your finger is doing. moving: the row still gliding after you let go ({ page, timer }).
+  // Like an iPhone pager, touching while it glides catches it right where it is and you carry on from there; the screen is
+  // only redrawn for the new page once everything has come to rest (redrawing under a moving finger made it jump).
+  let s = null, moving = null, noTapUntil = 0;
   const ease = 'transform .5s var(--ease-soft)';
-  const clearPeek = () => { if (s && s.peek) { s.peek.remove(); s.peek = null; } };
-  // The neighbouring pages are built ahead of time, once the screen has settled, so a swipe starts moving on its
-  // very first frame (building a page takes a few milliseconds, which would otherwise land right as your finger moves)
-  const ready = {};
-  const prep = dir => {
-    if (dir in ready) return ready[dir];
-    const html = opts.peek(dir);
+  const ready = {}, shown = new Map();
+  const prep = n => {
+    if (n in ready) return ready[n];
+    const html = opts.peek(n);
     let p = null;
     if (html != null) {
       p = document.createElement('div');
@@ -1260,61 +1264,80 @@ function swipePager(surface, target, opts) {
       p.innerHTML = html;
       p.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
     }
-    return (ready[dir] = p);
+    return (ready[n] = p);
   };
+  // The pages next to this one are built ahead of time, once the screen has settled, so a swipe starts moving on its very
+  // first frame (building a page takes a few milliseconds, which would otherwise land right as your finger moves)
   const later = f => { const run = () => { if (!surface.isConnected || s) return; if (touching || performance.now() - lastScroll < 200) return setTimeout(run, 250); f(); }; setTimeout(run, 300); };
-  later(() => { prep(1); later(() => prep(-1)); });   // only while nothing is moving
+  later(() => { prep(1); later(() => prep(-1)); });
+  // Page n in place beside this one (false if there's no such page)
+  const has = n => {
+    if (!n || shown.has(n)) return true;
+    for (let i = Math.sign(n); i !== n; i += Math.sign(n)) if (!has(i)) return false;   // only next to pages that exist
+    const p = prep(n); if (!p) return false;
+    p.style.left = `calc(${n * 100}% + ${n * 16}px)`;
+    p.style.top = (opts.peekTop ? opts.peekTop() : 0) + 'px';
+    target.appendChild(p); shown.set(n, p);
+    return true;
+  };
+  const lastPage = (sign, upTo) => { let n = 0; while (Math.abs(n) < upTo && has(n + sign)) n += sign; return n; };
+  const clearPeeks = () => { shown.forEach(p => p.remove()); shown.clear(); };
+  const xNow = () => { const tf = getComputedStyle(target).transform, M = window.DOMMatrix || window.WebKitCSSMatrix; return tf && tf !== 'none' && M ? new M(tf).m41 : 0; };
   surface.addEventListener('touchstart', e => {
     if (e.touches.length > 1 || e.target.closest('input, textarea, .chart, .grip')) { s = null; return; }
     const t = e.touches[0];
-    s = { x: t.clientX, y: t.clientY, axis: null, dir: 0, dx: 0, peek: null, lx: t.clientX, lt: performance.now(), v: 0 };
+    s = { x: t.clientX, y: t.clientY, axis: null, pos: 0, base: 0, lx: t.clientX, lt: performance.now(), v: 0 };
+    if (moving) {
+      // Caught while gliding: hold it where it is (and this touch doesn't count as a tap on a moving page)
+      clearTimeout(moving.timer); moving = null;
+      s.base = s.pos = xNow();
+      noTapUntil = Infinity;
+    }
     target.style.transition = 'none';
+    target.style.transform = `translateX(${s.base}px)`;
   }, { passive: true });
   surface.addEventListener('touchmove', e => {
     if (!s) return;
     const t = e.touches[0];
-    const dx = t.clientX - s.x, dy = t.clientY - s.y;
+    const fx = t.clientX - s.x, dy = t.clientY - s.y;
     if (!s.axis) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      s.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+      if (Math.abs(fx) < 8 && Math.abs(dy) < 8) return;
+      s.axis = s.base || Math.abs(fx) > Math.abs(dy) ? 'x' : 'y';   // a caught page stays a sideways swipe
     }
     if (s.axis !== 'x') return;
     e.preventDefault();
     const now = performance.now();
     s.v = (t.clientX - s.lx) / Math.max(1, now - s.lt); s.lx = t.clientX; s.lt = now;
-    const dir = dx < 0 ? 1 : -1;
-    if (dir !== s.dir) {
-      s.dir = dir;
-      clearPeek();
-      const p = prep(dir);
-      if (p) {
-        p.style.left = dir > 0 ? 'calc(100% + 16px)' : 'calc(-100% - 16px)';
-        p.style.top = (opts.peekTop ? opts.peekTop() : 0) + 'px';
-        target.appendChild(p);
-        s.peek = p;
-      }
-    }
-    s.dx = s.peek ? dx : dx * 0.25; // rubber-band when there's nothing on that side
-    target.style.transform = `translateX(${s.dx}px)`;
+    const W = target.offsetWidth + 16;
+    let x = s.base + fx;
+    const f = -x / W, sign = f > 0 ? 1 : -1, end = lastPage(sign, Math.ceil(Math.abs(f)));   // the furthest page there is that way
+    if (Math.abs(f) > Math.abs(end)) x = -(end + (f - end) * 0.25) * W;                      // past it: rubber band
+    s.pos = x;
+    target.style.transform = `translateX(${x}px)`;
   }, { passive: false });
-  const end = () => {
-    if (!s || s.axis !== 'x') { s = null; return; }
-    const w = target.offsetWidth;
-    const flick = Math.abs(s.v) > 0.45 && Math.sign(-s.v) === s.dir && Math.abs(s.dx) > 50;
-    const st = s;
-    s = null;
+  const done = () => {
+    if (!s) return;
+    const st = s; s = null;
+    if (noTapUntil === Infinity) noTapUntil = performance.now() + 400;
+    if (st.axis !== 'x' && !st.base) return;
+    const W = target.offsetWidth + 16, f = -st.pos / W;
+    // A flick (still moving fast when you let go) goes on to the next page that way; otherwise it settles on the nearest
+    // page, and from rest 30% of the width is enough to turn one
+    const flick = Math.abs(st.v) > 0.45 && performance.now() - st.lt < 100 && Math.abs(st.pos - st.base) > 40;
+    let page = flick ? (st.v < 0 ? Math.floor(f) + 1 : Math.ceil(f) - 1) : Math.round(f + (f > 0 ? 0.2 : f < 0 ? -0.2 : 0));
+    page = page > 0 ? lastPage(1, page) : page < 0 ? lastPage(-1, -page) : 0;
     target.style.transition = ease;
-    if (st.peek && (Math.abs(st.dx) > w * 0.3 || flick)) {
-      target.style.transform = `translateX(${-st.dir * (w + 16)}px)`;
+    target.style.transform = `translateX(${-page * W}px)`;
+    if (page) {
       haptic();
-      setTimeout(() => opts.commit(st.dir), SWIPE_MS);
+      const m = moving = { page, timer: setTimeout(() => { if (moving !== m) return; moving = null; opts.commit(page); }, SWIPE_MS) };
     } else {
-      target.style.transform = '';
-      setTimeout(() => { if (st.peek && !(s && s.peek === st.peek)) st.peek.remove(); }, 520);
+      const m = moving = { page, timer: setTimeout(() => { if (moving !== m) return; moving = null; clearPeeks(); }, 520) };
     }
   };
-  surface.addEventListener('touchend', end);
-  surface.addEventListener('touchcancel', end);
+  surface.addEventListener('touchend', done);
+  surface.addEventListener('touchcancel', done);
+  surface.addEventListener('click', e => { if (performance.now() < noTapUntil) { e.stopPropagation(); e.preventDefault(); } }, true);
 }
 
 /* ================= Session timer ================= */
@@ -2469,7 +2492,7 @@ function sheetSignin(el) {
 }
 
 /* ================= SETTINGS tab ================= */
-const APP_VERSION = '0.30.1';
+const APP_VERSION = '0.30.2';
 function applyTheme() {
   document.documentElement.dataset.theme = data.settings.theme;
   const dark = data.settings.theme === 'dark' || (data.settings.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);

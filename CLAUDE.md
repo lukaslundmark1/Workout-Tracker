@@ -9,7 +9,7 @@ A workout tracker and planner for **Lukas** (the owner), his girlfriend and frie
 
 - Repo: `lukaslundmark1/Workout-Tracker`, branch `main`, every file at the root. Pushing to `main` deploys it.
 - Live site (GitHub Pages): https://lukaslundmark1.github.io/Workout-Tracker/
-- Current version: **v0.30.1** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
+- Current version: **v0.30.2** (`APP_VERSION` in app.js). Bump it for every release Lukas will notice.
 - Firebase project `workout-tracker-705ae`, free Spark plan. Auth is Google + email/password; Firestore is in europe-north1. Lukas changes console settings himself. Tell him exactly what to click.
 
 ## How Lukas works (important)

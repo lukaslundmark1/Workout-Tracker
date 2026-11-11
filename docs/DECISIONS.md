@@ -120,6 +120,13 @@ Lukas: "Works. Lots of bugs." From now on the app is **iOS first** (the native a
 - dev/test-motion.py checks both reported bugs.
 - The native project changed (new plugin), so Lukas rebuilds once: fresh ZIP → `npm install`, `npx cap sync ios`, `npx cap open ios`, set the Team again, ▶.
 
+## Fast swiping (v0.30.2, 2026-11-11)
+Lukas sent a screen recording: swiping quickly back and forth between days made everything freeze slightly and jump around.
+- **Cause:** after letting go, the page glides for ~0.4 s and only then is the screen redrawn for the new day. A new swipe during the glide started on the old page, and the redraw then landed under the moving finger (jump, two days overlapping).
+- **`swipePager` rebuilt like an iPhone pager:** pages are numbered from the one on screen (…, -1, 0, 1, 2, …) and built on demand as they come into view, so quick flicks in a row go on to further days/exercises. Touching while it glides catches the row exactly where it is (read from the running transform) and you carry on; the screen is redrawn only once it has come to rest. A flick settles on the next page in the flick's direction, otherwise the nearest page (30% from rest turns one). Touching a gliding page doesn't count as a tap on it. Measured: the new day's title glides in and stays put through the redraw (no backward jumps).
+- **Header steadied:** the Today button only shows when you're looking at another week (in this week today is in the strip, in red). Before, it popped in and out, and the month name shortened, on every swipe away from or back to today.
+- dev/test-swipe.py covers fast swiping.
+
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.
 - Push: diff each record's hash against what was last synced, send in batches, debounced 600 ms.
