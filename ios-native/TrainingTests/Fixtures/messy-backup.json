@@ -1,0 +1,23 @@
+{"exercises":[
+  {"id":"b:bench press<script>","name":"  Bench <b>press</b>  ","track":["reps","weight"],"instructions":5,"video":"https://youtu.be/dQw4w9WgXcQ","muscle":"Chest","equip":"barbell","lib":"b:benchpress","note":"seat 4"},
+  {"id":"x1","name":"","video":"not a video","muscle":"legs","note":""},
+  {"name":"no id"},
+  null
+ ],
+ "sets":[
+  {"id":"s1","exId":"x1","date":"2026-11-11","slot":"2","weight":"82.5","reps":7.6,"ts":1762880100000},
+  {"id":"s2","exId":"x1","date":"2026-11-11","slot":99,"weight":-5,"reps":null,"ts":"abc"},
+  {"id":"s3","exId":"x1","date":"11/11/2026","slot":0,"weight":80,"reps":5,"ts":1},
+  {"id":"s4","exId":"x1","date":"2026-11-10","weight":1e9,"reps":2.5,"ts":2}
+ ],
+ "days":{
+  "2026-11-11":{"items":[{"exId":"x1","sets":null},{"exId":"b:benchpress","sets":"4"},{"sets":3}],"workouts":[{"id":"w1","name":"Push"},{"name":"x"}],"session":{"start":1762880000000,"end":null},"plan":{"id":"p1","index":2.4},"pinned":1,"rest":0,"absorb":"round"},
+  "bad-key":{"items":[]},
+  "2026-11-12":"nope",
+  "2026-11-13":{"absorb":"later","session":{"start":"5","end":"6"}}
+ },
+ "workouts":[{"id":"w1","name":" ","items":[{"exId":"x1","sets":20},{"exId":"b:benchpress"}]}],
+ "plans":[{"id":"p1","name":"PPL","weeks":99,"days":[{"workoutId":"w1"},null,{"workoutId":""}]}],
+ "activePlan":{"planId":"p1","begin":"2026-11-01","start":"2026-11-01"},
+ "settings":{"units":"imperial","theme":"neon","weekStart":"0","defaultSets":0,"name":"Lukas","code":"ab-CD12x9"}
+}

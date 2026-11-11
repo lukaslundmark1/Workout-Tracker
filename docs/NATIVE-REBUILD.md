@@ -70,8 +70,8 @@ Weights are always stored in **kg**; dates are local-day strings `YYYY-MM-DD`; t
   shared ones `s:<docId>`.
 
 ### Firestore layout (see `COLS`, `startSync`, `listen`, `pushChanges` in app.js)
-- `users/{uid}/{exercises|workouts|days|sets|plans|meta}/{id}`; days use the date as id; meta has one doc `settings` holding
-  `{ settings, active: activePlan || { planId: null } }`.
+- `users/{uid}/{exercises|workouts|days|sets|plans|meta}/{id}`; days use the date as id; meta has **two** docs:
+  `meta/settings` = the settings object and `meta/active` = `activePlan || { planId: null }` (checked against app.js `COLS`).
 - **Every doc carries `u`** (ms timestamp of the write). Last writer wins per record by `u`.
 - **Deletes are tombstones:** overwrite with `{ deleted: true, u }`. Never `deleteDoc` a user record (other devices would never hear of it).
 - The web app listens with `where('u', '>', from)` and skips unchanged records, so the native app must set `u = now` on every write.
