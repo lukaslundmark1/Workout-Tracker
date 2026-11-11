@@ -1,13 +1,14 @@
 // Bump this when you deploy a new version so old caches are cleared.
-const CACHE = 'tt-v28';
+const CACHE = 'tt-v30';
 const ASSETS = [
   './',
   './index.html',
+  './app.js?v=2383177279',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
-  './firebase-20631876.js',
+  './firebase-346e04e6.js',
 ];
 
 self.addEventListener('install', e => {

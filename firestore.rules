@@ -6,9 +6,11 @@ service cloud.firestore {
     function pair(x, y) { return x < y ? x + '_' + y : y + '_' + x; }
     function isAdmin() { return signedIn() && exists(/databases/$(database)/documents/admins/$(me())); }
     function validLib(d) {
-      return d.by == me() && d.name is string && d.name.size() > 0 && d.name.size() <= 60
+      return d.keys().hasOnly(['name', 'muscle', 'equip', 'track', 'by', 'byName', 'u'])
+        && d.by == me() && d.name is string && d.name.size() > 0 && d.name.size() <= 60
         && d.muscle is string && d.muscle.size() <= 20 && d.equip is string && d.equip.size() <= 20
-        && d.byName is string && d.byName.size() <= 60;
+        && d.byName is string && d.byName.size() <= 60
+        && d.track is list && d.track.size() == 2 && d.u is number;
     }
     function areFriends(a, b) {
       let path = /databases/$(database)/documents/links/$(pair(a, b));
@@ -20,17 +22,22 @@ service cloud.firestore {
       return exists(path) && get(path).data.status == 'accepted' && get(path).data.share[owner] == true;
     }
 
-    // Your own data: only you can change it; friends you share with can read it
-    match /users/{uid}/{document=**} {
-      allow read, write: if signedIn() && me() == uid;
-      allow read: if signedIn() && sharesWith(uid);
+    function str(v, max) { return v is string && v.size() <= max; }
+
+    // Your own data: only you can change it; friends you share with can read it.
+    // Only the app's own collections can be written (nothing else can be stored under your account).
+    match /users/{uid}/{col}/{docId} {
+      allow read: if signedIn() && (me() == uid || sharesWith(uid));
+      allow write: if signedIn() && me() == uid && col in ['exercises', 'workouts', 'days', 'sets', 'plans', 'meta'];
     }
 
     // Friend codes: anyone signed in can look up a code, only its owner can claim or change it
     match /codes/{code} {
       allow get: if signedIn();
-      allow create: if signedIn() && request.resource.data.uid == me();
-      allow update: if signedIn() && resource.data.uid == me() && request.resource.data.uid == me();
+      allow create: if signedIn() && request.resource.data.uid == me()
+        && request.resource.data.keys().hasOnly(['uid', 'name']) && str(request.resource.data.name, 60) && code.size() <= 8;
+      allow update: if signedIn() && resource.data.uid == me() && request.resource.data.uid == me()
+        && request.resource.data.keys().hasOnly(['uid', 'name']) && str(request.resource.data.name, 60);
       allow delete: if signedIn() && resource.data.uid == me();
     }
 
@@ -53,7 +60,9 @@ service cloud.firestore {
     match /gifts/{id} {
       allow read: if signedIn() && (resource.data.to == me() || resource.data.from == me());
       allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['from', 'to', 'fromName', 'toName', 'kind', 'name', 'payload', 'status', 'u'])
         && request.resource.data.from == me()
+        && str(request.resource.data.fromName, 60) && str(request.resource.data.toName, 60)
         && request.resource.data.to is string && request.resource.data.to != me()
         && areFriends(me(), request.resource.data.to)
         && request.resource.data.status == 'pending'
@@ -70,11 +79,15 @@ service cloud.firestore {
     match /links/{id} {
       allow get: if signedIn() && (resource == null || me() in resource.data.members);
       allow list: if signedIn() && me() in resource.data.members;
+      // You can only set your own share switch when asking (never the other person's)
       allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['members', 'from', 'status', 'share', 'names', 'u'])
         && request.resource.data.from == me()
         && request.resource.data.members.size() == 2
         && me() in request.resource.data.members
         && request.resource.data.status == 'pending'
+        && request.resource.data.share.keys().hasOnly([me()])
+        && request.resource.data.names.size() <= 2
         && id == pair(request.resource.data.members[0], request.resource.data.members[1]);
       // Each person may only change their own share switch and name; only the invited person can accept
       allow update: if signedIn() && me() in resource.data.members
