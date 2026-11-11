@@ -34,6 +34,7 @@ enum PadField: String { case w, r }
 struct PadState: Equatable {
     var day: String
     var exId: String
+    var g: String = ""                             // the workout group the row is in
     var i: Int
     var field: PadField
     var fresh: Bool
@@ -44,7 +45,7 @@ struct ScreenMetrics: Equatable { var height: CGFloat = 852; var safeBottom: CGF
 struct RestState: Codable, Equatable { var start: Double; var exId: String; var date: String }
 
 struct ToastMsg: Equatable, Identifiable {
-    enum Kind { case pr, done, info }
+    enum Kind { case pr, done, info, gift }
     let id = UUID()
     var kind: Kind
     var title: String
@@ -56,6 +57,7 @@ struct LogModel {
     var k: String
     var day: Day
     var item: WorkoutItem
+    var g: String                                  // the workout group (see Groups.swift)
     var ex: Exercise
     var today: [LoggedSet]
     var bySlot: [Int: LoggedSet]
@@ -69,7 +71,16 @@ struct LogModel {
 
 @Observable
 final class Store {
-    var data: AppData { didSet { if data.sets != oldValue.sets { idx = nil }; schedCache = nil; scheduleSave() } }
+    var data: AppData {
+        didSet {
+            if data.sets != oldValue.sets { idx = nil }
+            // Typed-but-unsaved numbers were in the old unit (here or on another device)
+            if data.settings.units != oldValue.settings.units { drafts = [:]; edits = [:]; pad = nil }
+            schedCache = nil; scheduleSave(); onChange?()
+        }
+    }
+    /// Called after every change (cloud sync schedules a push)
+    @ObservationIgnored var onChange: (() -> Void)?
 
     // Screen state (not saved, like the web app's `state`)
     var today: String = Day0.today { didSet { schedCache = nil } }
@@ -85,8 +96,12 @@ final class Store {
     var newRow: String?                            // "exId|day|row": grows in
     var tab: AppTab = .today
     var logOpen = false
+    var collapsed: Set<String> = []                // "day|group" folded on Today (open by default)
     var reordering = false                         // an exercise is being dragged on Today (the pages hold still)
-    var summaryFor: String?                        // day whose workout summary should open (after Finish)
+    var summaryFor: GroupKey?                      // the workout whose summary should open (after Finish)
+    /// Something to open in the Workouts tab (a workout or plan a friend sent, just added)
+    enum OpenRequest: Equatable { case workout(String), plan(String) }
+    var openRequest: OpenRequest?
     /// Paused timers: day → when it was paused (ms). Kept on this phone only: the shared data format has no pause,
     /// so resuming moves the session's start later by the paused time (the web app then shows the same duration).
     var pausedAt: [String: Double] = [:] { didSet { UserDefaults.standard.set(pausedAt, forKey: "tt.paused") } }                            // the exercise screen is up
@@ -102,7 +117,13 @@ final class Store {
     /// `persist: false` keeps everything in memory (tests)
     init(data: AppData? = nil, persist: Bool = true) {
         self.persist = persist
-        self.data = data ?? Store.loadFromDisk() ?? SampleData.make()
+        let disk = data == nil ? Store.loadFromDisk() : nil
+        self.data = data ?? disk ?? SampleData.make()
+        if persist && data == nil && disk == nil { UserDefaults.standard.set(true, forKey: Store.sampleKey) }
+        // Installed before accounts existed: the sample training is recognised by its plan
+        if persist && data == nil && UserDefaults.standard.object(forKey: Store.sampleKey) == nil {
+            UserDefaults.standard.set(self.data.plans.contains { $0.id == "sample-ppl" }, forKey: Store.sampleKey)
+        }
         self.rest = Store.loadRest()
         if persist { self.pausedAt = (UserDefaults.standard.dictionary(forKey: "tt.paused") as? [String: Double]) ?? [:] }
         closeStaleSessions()
@@ -140,6 +161,7 @@ final class Store {
         pad = nil; drafts = [:]; edits = [:]
         if let r = rest, !d.days.keys.contains(r.date) { rest = nil }
         data = d
+        if persist { UserDefaults.standard.set(false, forKey: Store.sampleKey) }
         closeStaleSessions()
         saveNow()
     }
@@ -154,7 +176,64 @@ final class Store {
     func resetSampleData() {
         pad = nil; rest = nil; drafts = [:]; edits = [:]
         data = SampleData.make()
+        if persist { UserDefaults.standard.set(true, forKey: Store.sampleKey) }
         selected = today
+    }
+
+    // MARK: Accounts (whose data is on this phone)
+
+    static let sampleKey = "tt.sample", ownerKey = "tt.owner"
+    nonisolated static func stashURL(_ uid: String) -> URL {
+        fileURL.deletingLastPathComponent().appendingPathComponent("training.\(uid.filter { $0.isLetter || $0.isNumber }).json")
+    }
+    /// An empty start that keeps this phone's preferences
+    private func emptyData() -> AppData {
+        var d = AppData()
+        d.settings.units = data.settings.units; d.settings.theme = data.settings.theme
+        d.settings.weekStart = data.settings.weekStart; d.settings.defaultSets = data.settings.defaultSets
+        return d
+    }
+    private func clearScreenState() { pad = nil; rest = nil; drafts = [:]; edits = [:]; pausedAt = [:]; selected = today }
+
+    /// The data on this phone belongs to one account (the web app's `claimLocalData`). If a different account signs in,
+    /// the previous person's data is put aside (kept on the phone) instead of being uploaded to the new account.
+    /// The made-up sample training is never uploaded: the first account to sign in starts from its own data.
+    /// Returns whether the data on the phone already belonged to this account (only then does what was last synced
+    /// with it still describe the phone's data).
+    @discardableResult
+    func claimLocalData(_ uid: String) -> Bool {
+        guard persist else { return true }
+        let ud = UserDefaults.standard
+        let owner = ud.string(forKey: Store.ownerKey)
+        defer { ud.set(false, forKey: Store.sampleKey); ud.set(uid, forKey: Store.ownerKey) }
+        if owner == uid { return true }
+        if let owner, owner != uid {
+            if let d = try? JSONEncoder().encode(data) { try? d.write(to: Store.stashURL(owner), options: .atomic) }
+            let mine = (try? Data(contentsOf: Store.stashURL(uid))).flatMap { try? JSONDecoder().decode(AppData.self, from: $0) }
+            clearScreenState()
+            data = mine ?? emptyData()
+            saveNow()
+        } else if owner == nil, ud.bool(forKey: Store.sampleKey) {
+            clearScreenState()
+            data = emptyData()
+            saveNow()
+        }
+        return false
+    }
+
+    /// Changes from the account (another device). What's on screen (number pad, typed values) stays as it is.
+    func applyRemote(_ d: AppData) {
+        data = d
+        if let r = rest, !(data.days[r.date]?.items.contains { $0.exId == r.exId } ?? false) { rest = nil }
+    }
+
+    /// Sign out with "Remove my training from this phone": an empty app that keeps the preferences
+    func wipeDevice(_ uid: String) {
+        clearScreenState()
+        data = emptyData()
+        try? FileManager.default.removeItem(at: Store.stashURL(uid))
+        UserDefaults.standard.removeObject(forKey: Store.ownerKey)
+        saveNow()
     }
     private static func loadRest() -> RestState? {
         guard let d = UserDefaults.standard.data(forKey: "tt.rest") else { return nil }
@@ -168,7 +247,7 @@ final class Store {
     // MARK: Lookups
 
     var units: Units { Units(imperial: data.settings.units == "imperial") }
-    private var index: SetIndex { if let i = idx { return i }; let i = SetIndex(data.sets); idx = i; return i }
+    var index: SetIndex { if let i = idx { return i }; let i = SetIndex(data.sets); idx = i; return i }
     func setsOf(_ exId: String, _ k: String) -> [LoggedSet] { index.byExDate[exId + "|" + k] ?? [] }
     func setsOn(_ k: String) -> [LoggedSet] { index.byDate[k] ?? [] }
     func hasSets(_ k: String) -> Bool { index.byDate[k] != nil }
@@ -184,9 +263,12 @@ final class Store {
     func woById(_ id: String) -> Workout? { data.workouts.first { $0.id == id } }
 
     /// A day as shown: its stored copy, or what the plan has for it, or nothing
-    func dayOf(_ k: String) -> Day { data.days[k] ?? virtualDay(k) ?? Day() }
-    /// Makes a day real (stored). A planned day that hasn't been touched yet is filled in from the plan.
-    func ensureDay(_ k: String) { if data.days[k] == nil { data.days[k] = virtualDay(k) ?? Day() } }
+    func dayOf(_ k: String) -> Day { normalized(data.days[k] ?? virtualDay(k) ?? Day()) }
+    /// Makes a day real (stored), with its exercises in groups. A planned day that hasn't been touched yet is filled in from the plan.
+    func ensureDay(_ k: String) {
+        let d = normalized(data.days[k] ?? virtualDay(k) ?? Day())
+        if data.days[k] != d { data.days[k] = d }
+    }
 
     // MARK: Personal records (a day's best set beats every earlier day; the first session doesn't count)
 
@@ -207,14 +289,14 @@ final class Store {
     func logModel(_ k: String, _ i: Int) -> LogModel? {
         let day = dayOf(k)
         guard i >= 0, i < day.items.count, let ex = exById(day.items[i].exId) else { return nil }
-        let item = day.items[i]
-        let today = setsOf(ex.id, k)
+        let item = day.items[i], g = item.w ?? otherGroup
+        let today = setsOf(ex.id, k, g)
         var bySlot: [Int: LoggedSet] = [:]
         for s in today { bySlot[s.slot] = s }
         let maxSlot = today.map(\.slot).max() ?? -1
         let prevK = prevDateOf(ex.id, k)
-        return LogModel(k: k, day: day, item: item, ex: ex, today: today, bySlot: bySlot, n: max(item.sets ?? 0, maxSlot + 1),
-                        dkey: ex.id + "|" + k, prevK: prevK, prevSets: prevK.map { setsOf(ex.id, $0) } ?? [], idx: i, total: day.items.count)
+        return LogModel(k: k, day: day, item: item, g: g, ex: ex, today: today, bySlot: bySlot, n: max(item.sets ?? 0, maxSlot + 1),
+                        dkey: ex.id + "|" + k + "|" + g, prevK: prevK, prevSets: prevK.map { setsOf(ex.id, $0) } ?? [], idx: i, total: day.items.count)
     }
 
     /// Suggested values for a row that isn't done yet:
@@ -232,11 +314,7 @@ final class Store {
         return suggest(m, i)
     }
 
-    func setsLeft(_ k: String) -> Int { dayOf(k).items.reduce(0) { $0 + max(0, ($1.sets ?? 0) - setsOf($1.exId, k).count) } }
-    func isFinished(_ k: String) -> Bool { dayOf(k).session?.end != nil }
-    func isRunning(_ k: String) -> Bool { if let s = dayOf(k).session { return s.end == nil } else { return false } }
-    /// Finish is offered for a workout that's running, or for today once something is logged.
-    func canFinish(_ k: String) -> Bool { !isFinished(k) && (isRunning(k) || (k == today && hasSets(k))) }
+    func setsLeft(_ k: String) -> Int { dayOf(k).items.reduce(0) { $0 + max(0, ($1.sets ?? 0) - setsOf($1.exId, k, $1.w ?? otherGroup).count) } }
 
     // MARK: Today
 
@@ -246,6 +324,7 @@ final class Store {
         var s: String
         if !day.items.isEmpty && !day.workouts.isEmpty { s = day.workouts.map(\.name).joined(separator: " + ") }
         else if !day.items.isEmpty { s = "Custom workout" }
+        else if let away = data.days[k]?.away, let pd, let w = pd.workout { s = away.isEmpty ? "Rest day" : "\(w.name) moved to \(Fmt.short(away))" }
         else if let pd, pd.extra { s = "Rest day (moved)" }
         else if let pd, let w = pd.workout { s = "\(w.name) (no exercises yet)" }
         else if pd != nil { s = "Rest day" }
@@ -253,58 +332,8 @@ final class Store {
         else { s = "No workout planned" }
         if !day.items.isEmpty && k < today && !hasSets(k) && day.session == nil { s += " · not trained" }
         if let pd { s += " · \(pd.plan.name)" + (pd.index >= 0 ? ", day \(pd.index + 1) of \(pd.plan.days.count)" : "") }
-        if let ses = day.session { s += ses.end != nil ? " · Finished in \(Fmt.mins(ses.end! - ses.start))" : " · In progress" }
+        if isRunning(k) { s += " · In progress" } else if isFinished(k) { s += " · Finished in \(Fmt.mins(dayDuration(k)))" }
         return s
-    }
-
-    func addExercise(_ exId: String, to k: String) {
-        ensureDay(k)
-        guard !data.days[k]!.items.contains(where: { $0.exId == exId }) else { return }
-        data.days[k]!.items.append(WorkoutItem(exId: exId, sets: data.settings.defaultSets))
-        Haptics.impact()
-    }
-    func addWorkout(_ wId: String, to k: String) {
-        guard let w = woById(wId) else { return }
-        ensureDay(k)
-        for it in w.items where !data.days[k]!.items.contains(where: { $0.exId == it.exId }) { data.days[k]!.items.append(it) }
-        if !data.days[k]!.workouts.contains(where: { $0.id == w.id }) { data.days[k]!.workouts.append(WorkoutRef(id: w.id, name: w.name)) }
-        Haptics.impact()
-    }
-    func removeExercise(_ exId: String, from k: String) {
-        // Already gone (a quick second tap on a row that's still fading out): do nothing. Going on would "empty"
-        // the day a second time, which dropped the moved rest day and brought the planned exercises back.
-        guard dayOf(k).items.contains(where: { $0.exId == exId }) else { return }
-        ensureDay(k)
-        Haptics.impact()
-        if pad?.exId == exId && pad?.day == k { pad = nil }
-        data.days[k]!.items.removeAll { $0.exId == exId }
-        data.sets = data.sets.filter { !($0.exId == exId && $0.date == k) }
-        drafts[exId + "|" + k] = nil
-        if let r = rest, r.date == k, r.exId == exId { rest = nil }
-        if data.days[k]!.items.isEmpty { clearEmptyDay(k, byUser: true) }
-    }
-    func moveExercise(in k: String, from: IndexSet, to: Int) {
-        ensureDay(k)
-        data.days[k]!.items.move(fromOffsets: from, toOffset: to)
-    }
-    /// Put a day's exercises in this order (after dragging one)
-    func reorderExercises(in k: String, _ ids: [String]) {
-        ensureDay(k)
-        let items = data.days[k]!.items
-        let sorted = ids.compactMap { id in items.first { $0.exId == id } } + items.filter { !ids.contains($0.exId) }
-        if sorted.map(\.exId) != items.map(\.exId) { data.days[k]!.items = sorted }
-    }
-    /// A day whose exercises were all removed starts over: no workout name, no timer/finished state.
-    /// If YOU emptied a planned day, it becomes a moved rest day so the plan moves along, like "Move back a day"
-    /// with "Just this workout". Otherwise (e.g. an exercise was deleted) the stored copy goes and the plan shows the day again.
-    func clearEmptyDay(_ k: String, byUser: Bool = false) {
-        guard var d = data.days[k] else { return }
-        d.workouts = []
-        if !hasSets(k) { d.session = nil; pausedAt[k] = nil }
-        if d.session != nil { data.days[k] = d; return }
-        if byUser && d.plan != nil && d.pinned != true && k >= today && activePlan != nil {
-            var r = Day(); r.rest = true; r.absorb = "next"; data.days[k] = r
-        } else { data.days.removeValue(forKey: k) }
     }
 
     // MARK: Ticking sets
@@ -312,11 +341,11 @@ final class Store {
     func toggle(_ k: String, _ idx: Int, _ i: Int) {
         guard let m = logModel(k, idx) else { return }
         let done = m.bySlot[i]
-        if var p = pad, p.day == k, p.exId == m.ex.id {
+        if var p = pad, p.day == k, p.exId == m.ex.id, p.g == m.g {
             padCommit()
             if p.i == i {
                 p.fresh = true
-                if done == nil { let nx = i + 1; pad = nx < m.n ? PadState(day: k, exId: m.ex.id, i: nx, field: .w, fresh: true) : nil }
+                if done == nil { let nx = i + 1; pad = nx < m.n ? PadState(day: k, exId: m.ex.id, g: m.g, i: nx, field: .w, fresh: true) : nil }
                 else { pad = p }
             }
         }
@@ -334,14 +363,14 @@ final class Store {
         guard let w, let r else { Haptics.error(); return }
         Haptics.impact()
         let prBefore = prFor(m.ex.id, k)?.set.id
-        let newSet = LoggedSet(id: newId(), exId: m.ex.id, date: k, slot: i, weight: units.fromU(w), reps: r, ts: nowMs())
+        let newSet = LoggedSet(id: newId(), exId: m.ex.id, date: k, slot: i, weight: units.fromU(w), reps: r, ts: nowMs(), w: m.g)
         var d = data
+        // the first set of a workout today starts its timer
+        setSession(k, m.g, sessionOf(k, m.g) ?? (k == today ? Session(start: nowMs()) : nil), in: &d)
         d.sets.append(newSet)
-        d.days[k] = d.days[k] ?? virtualDay(k) ?? Day()
-        if let it = d.days[k]!.items.firstIndex(where: { $0.exId == m.ex.id }), i + 1 > (d.days[k]!.items[it].sets ?? 0) {
+        if let it = d.days[k]!.items.firstIndex(where: { $0.exId == m.ex.id && $0.w == m.g }), i + 1 > (d.days[k]!.items[it].sets ?? 0) {
             d.days[k]!.items[it].sets = i + 1
         }
-        if d.days[k]!.session == nil && k == today { d.days[k]!.session = Session(start: nowMs()) }   // first set today starts the timer
         data = d
         justTicked = newSet.id
         drafts[m.dkey]?[i] = nil
@@ -352,11 +381,11 @@ final class Store {
             let u = units
             showToast(.init(kind: .pr, title: "New personal record", sub: "\(m.ex.name) · est. 1RM \(String(format: "%.1f", (u.toU(prNow.now) * 10).rounded() / 10)) \(u.u)"))
         }
-        if k == today && !isFinished(k) {
-            let total = max(dayOf(k).items.first { $0.exId == m.ex.id }?.sets ?? 0, m.n)
-            let doneNow = setsOf(m.ex.id, k).count
+        if k == today && !isFinished(k, m.g) {
+            let total = max(dayOf(k).items.first { $0.exId == m.ex.id && $0.w == m.g }?.sets ?? 0, m.n)
+            let doneNow = setsOf(m.ex.id, k, m.g).count
             if total >= 2 && doneNow < total { rest = RestState(start: nowMs(), exId: m.ex.id, date: today) } else { rest = nil }
-            if setsLeft(k) == 0 && !newPR {
+            if setsLeft(k, m.g) == 0 && !newPR {
                 Haptics.success(after: 0.14)
                 showToast(.init(kind: .done, title: "All planned sets done", sub: "Finish the workout when you're ready"))
             }
@@ -365,7 +394,7 @@ final class Store {
 
     func addRow(_ k: String, _ idx: Int) {
         ensureDay(k)
-        guard let m = logModel(k, idx), let it = data.days[k]?.items.firstIndex(where: { $0.exId == m.ex.id }) else { return }
+        guard let m = logModel(k, idx), let it = data.days[k]?.items.firstIndex(where: { $0.exId == m.ex.id && $0.w == m.g }) else { return }
         Haptics.select()
         newRow = m.dkey + "|\(m.n)"
         data.days[k]!.items[it].sets = m.n + 1
@@ -373,9 +402,9 @@ final class Store {
     func removeRow(_ k: String, _ idx: Int) {
         ensureDay(k)
         guard let m = logModel(k, idx), m.n > 0, m.bySlot[m.n - 1] == nil,
-              let it = data.days[k]?.items.firstIndex(where: { $0.exId == m.ex.id }) else { return }
+              let it = data.days[k]?.items.firstIndex(where: { $0.exId == m.ex.id && $0.w == m.g }) else { return }
         Haptics.select()
-        if pad?.exId == m.ex.id && pad?.i == m.n - 1 { pad = nil }
+        if pad?.exId == m.ex.id && pad?.g == m.g && pad?.i == m.n - 1 { pad = nil }
         data.days[k]!.items[it].sets = m.n - 1
         drafts[m.dkey]?[m.n - 1] = nil
     }
@@ -388,10 +417,10 @@ final class Store {
 
     // MARK: Number pad
 
-    func padOpen(_ k: String, _ exId: String, _ i: Int, _ field: PadField) {
+    func padOpen(_ k: String, _ exId: String, _ i: Int, _ field: PadField, group g: String = otherGroup) {
         let was = pad
-        if let was, was.i != i || was.field != field || was.exId != exId { padCommit() }
-        pad = PadState(day: k, exId: exId, i: i, field: field, fresh: true)
+        if let was, was.i != i || was.field != field || was.exId != exId || was.g != g { padCommit() }
+        pad = PadState(day: k, exId: exId, g: g, i: i, field: field, fresh: true)
         if was == nil { Haptics.select() }
     }
     func padClose() {
@@ -400,7 +429,7 @@ final class Store {
         pad = nil
     }
     private func padModel() -> (LogModel, Int)? {
-        guard let p = pad, let idx = dayOf(p.day).items.firstIndex(where: { $0.exId == p.exId }), let m = logModel(p.day, idx), p.i < m.n else { return nil }
+        guard let p = pad, let idx = dayOf(p.day).items.firstIndex(where: { $0.exId == p.exId && ($0.w ?? otherGroup) == p.g }), let m = logModel(p.day, idx), p.i < m.n else { return nil }
         return (m, p.i)
     }
     /// The value in the field being typed into.
@@ -431,7 +460,7 @@ final class Store {
         switch k {
         case "done": padClose(); return
         case "next": padNext(); return
-        case "w", "r": padOpen(p.day, p.exId, p.i, PadField(rawValue: k)!); return
+        case "w", "r": padOpen(p.day, p.exId, p.i, PadField(rawValue: k)!, group: p.g); return
         default: break
         }
         Haptics.select()
@@ -458,54 +487,21 @@ final class Store {
     /// Weight → reps of the same set → weight of the next set → … → done
     func padNext() {
         guard let p = pad else { return }
-        if p.field == .w { padOpen(p.day, p.exId, p.i, .r); return }
-        if p.i + 1 < padRows { padOpen(p.day, p.exId, p.i + 1, .w); return }
+        if p.field == .w { padOpen(p.day, p.exId, p.i, .r, group: p.g); return }
+        if p.i + 1 < padRows { padOpen(p.day, p.exId, p.i + 1, .w, group: p.g); return }
         padClose()
     }
 
     // MARK: Timer and Finish
 
-    func startTimer(_ k: String) {
-        ensureDay(k)
-        Haptics.impact()
-        pausedAt[k] = nil
-        data.days[k]!.session = Session(start: nowMs())
-    }
-    /// Resume a finished workout (Duration sheet)
-    func resume(_ k: String) { pausedAt[k] = nil; data.days[k]?.session?.end = nil }
-
-    func isPaused(_ k: String) -> Bool { pausedAt[k] != nil && isRunning(k) }
-    /// The timer's time: up to now, or up to when it was paused
-    func elapsed(_ k: String) -> Double {
-        guard let s = dayOf(k).session else { return 0 }
-        return (s.end ?? pausedAt[k] ?? nowMs()) - s.start
-    }
-    /// "Now" for a workout: when its timer was paused, or now
-    func clock(_ k: String) -> Double { isPaused(k) ? pausedAt[k]! : nowMs() }
-    /// Tapping the timer: start it, pause it, carry on. (Ending is only Finish workout.)
-    func tapTimer(_ k: String) {
-        guard let s = dayOf(k).session else { startTimer(k); return }
-        guard s.end == nil else { return }
-        if let p = pausedAt[k] {
-            Haptics.impact()
-            let start = s.start + (nowMs() - p)        // the paused time doesn't count
-            pausedAt[k] = nil
-            ensureDay(k)
-            data.days[k]!.session = Session(start: start)
-        } else {
-            Haptics.select()
-            pausedAt[k] = nowMs()
-        }
-    }
-
-    struct Unticked { var exId: String; var slot: Int; var w: Double?; var r: Int? }
-    func untickedSets(_ k: String) -> [Unticked] {
+    struct Unticked { var exId: String; var g: String; var slot: Int; var w: Double?; var r: Int? }
+    func untickedSets(_ k: String, _ g: String) -> [Unticked] {
         var out: [Unticked] = []
         for idx in dayOf(k).items.indices {
-            guard let m = logModel(k, idx) else { continue }
+            guard let m = logModel(k, idx), m.g == g else { continue }
             for i in 0..<m.n where m.bySlot[i] == nil {
                 let v = suggest(m, i)
-                out.append(Unticked(exId: m.ex.id, slot: i, w: parseW(v.w), r: parseR(v.r)))
+                out.append(Unticked(exId: m.ex.id, g: m.g, slot: i, w: parseW(v.w), r: parseR(v.r)))
             }
         }
         return out
@@ -524,12 +520,13 @@ final class Store {
     /// A session left running on an earlier day closes at its last set, unless it was active in the last 3 hours.
     func closeStaleSessions() {
         let tk = Day0.today, now = nowMs()
-        for (k, d) in data.days where k < tk {
-            guard let s = d.session, s.end == nil else { continue }
-            let last = setsOn(k).map(\.ts).max()
-            if max(last ?? 0, s.start) > now - 3 * 3600_000 { continue }
-            data.days[k]!.session = Session(start: s.start, end: max(last ?? s.start, s.start))
-            pausedAt[k] = nil
+        for (k, d) in data.days where k < tk && d.session?.end == nil && d.session != nil {
+            for (g, s) in sessions(k) where s.end == nil {
+                let last = lastSetTs(k, g)
+                if max(last ?? 0, s.start) > now - 3 * 3600_000 { continue }
+                setSession(k, g, Session(start: s.start, end: max(last ?? s.start, s.start)))
+                clearPause(k, g)
+            }
         }
     }
     /// The phone often resumes the app instead of reopening it: follow the date to the new today.
@@ -538,11 +535,14 @@ final class Store {
         guard tk != today else { return }
         let old = today
         // A workout still active (training past midnight) keeps you on that day until it's finished or idle
-        if isRunning(old), max(setsOn(old).map(\.ts).max() ?? 0, dayOf(old).session!.start) > nowMs() - 3 * 3600_000 { return }
+        if sessions(old).contains(where: { g, s in s.end == nil && max(lastSetTs(old, g) ?? 0, s.start) > nowMs() - 3 * 3600_000 }) { return }
         today = tk
         if selected == old { selected = tk }
         closeStaleSessions()
         if let r = rest, r.date != tk { rest = nil }
-        pausedAt = pausedAt.filter { $0.key >= tk || isRunning($0.key) }
+        pausedAt = pausedAt.filter { key, _ in
+            let parts = key.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            return parts[0] >= tk || (parts.count == 2 && isRunning(parts[0], parts[1]))
+        }
     }
 }

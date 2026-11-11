@@ -16,6 +16,7 @@ struct WorkoutEditor: View {
     @State private var adding = false
     @State private var setsFor: Int?
     @State private var confirmDelete = false
+    @State private var sending = false
     @FocusState private var nameFocused: Bool
 
     var body: some View {
@@ -44,6 +45,11 @@ struct WorkoutEditor: View {
                 }
                 if !error.isEmpty {
                     Section { Text(error).foregroundStyle(Color.red) }.listRowBackground(Color.clear)
+                }
+                if !draft.items.isEmpty {
+                    Section {
+                        Button { Haptics.select(); sending = true } label: { Label("Send to a friend", systemImage: "paperplane") }
+                    }
                 }
                 if draft.workoutId != nil {
                     Section {
@@ -80,6 +86,11 @@ struct WorkoutEditor: View {
             SetCountSheet(title: store.exById(draft.items[i].exId)?.name ?? "Exercise", button: "Save", start: draft.items[i].sets ?? 3) { n in
                 draft.items[i].sets = n
             }
+        }
+        .sheet(isPresented: $sending) {
+            // what's in the editor now (like the web app)
+            let nm = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            SendToSheet(item: .workout(Workout(id: draft.workoutId ?? "", name: nm.isEmpty ? "Workout" : nm, items: draft.items)))
         }
         .onAppear { if draft.workoutId == nil { nameFocused = true } }
     }

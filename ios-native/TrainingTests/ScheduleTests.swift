@@ -52,11 +52,14 @@ final class ScheduleTests: XCTestCase {
                 let where_ = "run \(run["variant"]!) step \(n) (op \(op) on \(k))"
 
                 // stored days
+                // (compared without what the native app adds since days hold several workouts: the workout tag on each
+                // exercise and a workout's own copy of an exercise another workout that day also has; see Groups.swift)
                 let days = try decode([String: Day].self, step["days"]!)
-                if s.data.days != days {
+                let mine = s.data.days.mapValues(Self.webShape)
+                if mine != days {
                     failures += 1
-                    let diff = Set(days.keys).union(s.data.days.keys).filter { days[$0] != s.data.days[$0] }.sorted()
-                    XCTFail("\(where_): stored days differ at \(diff.prefix(3)) web=\(diff.first.flatMap { days[$0] }.map { "\($0)" } ?? "nil") swift=\(diff.first.flatMap { s.data.days[$0] }.map { "\($0)" } ?? "nil")")
+                    let diff = Set(days.keys).union(mine.keys).filter { days[$0] != mine[$0] }.sorted()
+                    XCTFail("\(where_): stored days differ at \(diff.prefix(3)) web=\(diff.first.flatMap { days[$0] }.map { "\($0)" } ?? "nil") swift=\(diff.first.flatMap { mine[$0] }.map { "\($0)" } ?? "nil")")
                 }
                 let ex = step["expect"] as! [String: Any]
 
@@ -73,7 +76,7 @@ final class ScheduleTests: XCTestCase {
                 for row in ex["days30"] as! [[Any]] {
                     let d = row[0] as! String
                     XCTAssertEqual(s.planDayFor(d)?.index, row[1] as? Int, "\(where_): plan day of \(d)")
-                    XCTAssertEqual(s.dayOf(d).items.count, row[2] as! Int, "\(where_): items on \(d)")
+                    XCTAssertEqual(Set(s.dayOf(d).items.map(\.exId)).count, row[2] as! Int, "\(where_): exercises on \(d)")
                     XCTAssertEqual(s.canDoToday(d), row[3] as! Bool, "\(where_): can do \(d) today")
                 }
                 // the move-back sheet's previews
@@ -104,5 +107,12 @@ final class ScheduleTests: XCTestCase {
         XCTAssertEqual(s.dayLabel("2026-11-11"), "Rest day (moved) · My plan")
         XCTAssertEqual(s.dayLabel("2026-11-12"), "Upper · My plan, day 1 of 2")
         XCTAssertEqual(s.dayLabel("2026-11-01"), "Nothing logged")
+    }
+
+    /// A day as the web app would store it: each exercise once, no workout tags
+    static func webShape(_ d: Day) -> Day {
+        var d = d, seen = Set<String>()
+        d.items = d.items.filter { seen.insert($0.exId).inserted }.map { WorkoutItem(exId: $0.exId, sets: $0.sets) }
+        return d
     }
 }

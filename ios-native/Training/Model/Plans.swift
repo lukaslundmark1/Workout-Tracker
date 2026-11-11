@@ -46,7 +46,7 @@ extension Store {
     func planIndexOf(_ d: Day?, _ plan: Plan) -> Int? {
         guard let d else { return nil }
         if let p = d.plan, p.id == plan.id, p.index >= 0, p.index < plan.days.count { return p.index }
-        let ids = d.workouts.map(\.id)
+        let ids = d.workouts.filter { $0.moved != true }.map(\.id)   // a plan workout moved here isn't done early
         return plan.days.firstIndex { x in x.workoutId != nil && ids.contains(x.workoutId!) }
     }
 
@@ -134,7 +134,7 @@ extension Store {
         let sc = schedule
         guard sc.plan != nil else { return }
         let stale = data.days.filter { k, d in
-            guard k >= today, d.plan != nil, d.pinned != true, d.rest != true, d.session == nil, !hasSets(k) else { return false }
+            guard k >= today, d.plan != nil, d.pinned != true, d.rest != true, d.away == nil, d.session == nil, !hasSets(k) else { return false }
             let e = sc.map[k]
             return e == nil || e!.index != d.plan!.index
         }.map(\.key)
@@ -143,7 +143,7 @@ extension Store {
     func virtualDay(_ k: String, in sc: Schedule? = nil) -> Day? {
         guard let pd = planDayFor(k, in: sc), let w = pd.workout else { return nil }
         var d = Day()
-        d.items = w.items.filter { exById($0.exId) != nil }.map { WorkoutItem(exId: $0.exId, sets: $0.sets) }
+        d.items = w.items.filter { exById($0.exId) != nil }.map { WorkoutItem(exId: $0.exId, sets: $0.sets, w: w.id) }
         d.workouts = [WorkoutRef(id: w.id, name: w.name)]
         d.plan = PlanRef(id: pd.plan.id, index: pd.index)
         return d
@@ -154,7 +154,8 @@ extension Store {
         return sc.map.keys.sorted().first { $0 >= from && sc.map[$0]!.index == index && !sc.map[$0]!.extra && !sc.map[$0]!.other }
     }
 
-    // MARK: Moving things
+    // MARK: Moving things (the web app's ways; no buttons for them in this app since 2026-11-11, where Move replaced
+    // them, but days the web app moves this way are still read correctly, and the tests replay them against app.js)
 
     /// Move a planned workout back a day: an extra rest day there, and how far the change reaches
     func moveBack(_ k: String, absorb: String?) {

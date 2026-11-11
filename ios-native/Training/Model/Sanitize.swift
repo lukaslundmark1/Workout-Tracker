@@ -12,7 +12,7 @@ nonisolated enum Clean {
     static let noteMax = 200
 
     /// JS `String(v)` for the values JSON can hold
-    private static func jsString(_ v: Any?) -> String {
+    static func jsString(_ v: Any?) -> String {
         switch v {
         case nil, is NSNull: return ""
         case let s as String: return s
@@ -62,7 +62,7 @@ nonisolated enum Clean {
         if let s = v as? String, list.contains(s) { return s }
         return dflt
     }
-    private static func truthy(_ v: Any?) -> Bool {
+    static func truthy(_ v: Any?) -> Bool {
         switch v {
         case nil, is NSNull: return false
         case let n as NSNumber: return n.doubleValue != 0 && !n.doubleValue.isNaN

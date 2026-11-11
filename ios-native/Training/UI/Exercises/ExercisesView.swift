@@ -149,7 +149,7 @@ struct LibraryView: View {
 
     private func rowState(_ x: LibEntry) -> LibRow.State {
         guard let mine = store.mineFor(x) else { return .add }
-        if case .day(let k) = mode { return store.dayOf(k).items.contains { $0.exId == mine.id } ? .added : .add }
+        if case .day(let k) = mode { return store.dayOf(k).items.contains { $0.exId == mine.id && $0.w == otherGroup } ? .added : .add }
         return .inList
     }
 }

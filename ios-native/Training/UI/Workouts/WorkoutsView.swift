@@ -28,6 +28,17 @@ struct WorkoutsView: View {
         .sheet(item: $openPlan) { p in PlanView(planId: p.id).presentationDragIndicator(.visible) }
         .sheet(item: $editWorkout) { d in WorkoutEditor(draft: d) }
         .sheet(item: $editPlan) { d in PlanEditor(draft: d) { id in if let id { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openPlan = Ident(id: id) } } } }
+        .onChange(of: store.openRequest, initial: true) { _, r in openRequested(r) }
+    }
+
+    /// A workout or plan a friend sent, just added: show it
+    private func openRequested(_ r: Store.OpenRequest?) {
+        guard let r else { return }
+        store.openRequest = nil
+        switch r {
+        case .plan(let id): Motion.run { seg = "plans" }; openPlan = Ident(id: id)
+        case .workout: Motion.run { seg = "workouts" }          // (it's in the list, like the web app)
+        }
     }
 
     @ViewBuilder private var plans: some View {

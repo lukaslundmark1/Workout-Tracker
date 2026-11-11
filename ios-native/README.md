@@ -6,7 +6,10 @@ The web app and the current iPhone app (`../native`) are untouched.
 
 ## What's in it so far
 
-- The tab bar (Today in the middle with today's date on its icon). Friends says what's coming.
+- The tab bar (Today in the middle with today's date on its icon); a red number on Friends for requests and things sent to you.
+- **Friends:** your friend code (share or copy), add a friend by code, requests, a friend's profile (stats, workouts, an
+  exercise's graph and history), your own profile, the sharing switch, sending workouts and plans (Inbox, add or decline,
+  unsend). Same data as the web app, so β and web-app users can be friends.
 - **Today:** week strip with the sliding capsule (red on today), swipe days left and right, a ring per exercise,
   the progress bar, Finish workout, Add exercise / workout. Drag ≡ (or press and hold a row) to reorder, with haptics;
   the red trash removes an exercise from the day (asks first with "Delete" when it has logged sets).
@@ -14,9 +17,11 @@ The web app and the current iPhone app (`../native`) are untouched.
   the phone; resuming moves the start later, so the shared data (and the web app) show the duration without the pause.
 - **Workout summary** after Finish (and "Workout summary" on a finished day): duration, sets, kg lifted, exercises
   (counting up), personal records, each exercise's best set ▲ / ▼ % / = against last time.
-- **Plans:** the active plan fills in the days (day labels like "Pull · Push Pull Legs, day 3 of 6", rest days),
-  "Can't make it today" / "Move back a day" with the three choices and their 7-day previews, Undo move,
-  "Do X today" on a rest day, "Do it today". The schedule is a line-by-line port of the web app's.
+- **Days hold workouts:** each workout on a day is its own group (fold it with the arrow); single exercises go in
+  "Other exercises". **Move** on a workout opens a calendar: tap a day and it goes there (a plan workout moves alone,
+  the rest of the plan stays on its dates). The same exercise can be in two workouts with separate sets.
+- **Plans:** the active plan fills in the days (day labels like "Pull · Push Pull Legs, day 3 of 6", rest days).
+  The schedule is a line-by-line port of the web app's.
 - **Exercise screen:** slides up from the bottom; swipe it down (or tap ⌄) and it slides back down. Last time,
   note, instructions, set rows with ticking, the app's own number pad, add/remove a set, page dots and swiping
   between exercises, the timer at the top right, Finish here.
@@ -29,9 +34,13 @@ The web app and the current iPhone app (`../native`) are untouched.
   instructions, note, video, Delete), and each exercise's page: progress chart (Swift Charts; Est. 1RM / Heaviest /
   Volume / Reps; 3M / 6M / 1Y / All; drag across it to read any session), note, instructions, history with PRs. "Last time" on the exercise
   screen opens the same chart and history. Today's Add sheet can browse the database and make a new exercise.
-- **Backups:** Settings → Import backup loads a backup exported from the web app (so you can try it with your own
-  training); Export backup makes a file the web app can import. Everything stays on the phone: no sign-in or sync yet.
+- **Sign in and sync:** Settings → "Sign in to back up and sync" (email + password, Create account, Forgot password?).
+  It's the same account as the web app: training logged in either one shows up in the other within a second or two.
+  Settings shows "Backed up" / "Syncing…" / "Offline — will sync later". Sign out (optionally removing your training from
+  this phone) and Delete account work like the web app's. Needs `GoogleService-Info.plist` in `Training/` (see HANDOFF.md).
+- **Backups:** Settings → Import backup loads a backup exported from the web app; Export backup makes a file the web app can import.
 - Starts with made-up sample training (a Push Pull Legs plan). Settings → "Start over with the sample data" resets it.
+  The sample training is never uploaded: signing in starts from your account's own training.
 
 ## Put it on your iPhone
 
@@ -73,6 +82,10 @@ Start with `HANDOFF.md` (where things stand, what's next, how to build and test)
 - `Training/Model/Workouts.swift` + `Training/UI/Workouts/`: the Workouts tab (save/delete/start/end, tested in `WorkoutsTests`).
 - `Training/Model/Library.swift` + `Training/UI/Exercises/`: the exercise database (the web app's LIB_RAW, word for word),
   save/delete exercise, chart series, PRs per day (tested in `ExercisesTests` with numbers from app.js's formulas).
-- Not done yet (later steps): Firebase sign-in and sync (then: exercises shared in the database, sharing your own),
-  Friends tab and sending workouts/plans, the rest of Settings, calendar,
+- `Training/Model/SyncCore.swift` + `Cloud.swift` + `UI/Common/AccountViews.swift`: accounts and sync (Firebase iOS SDK via
+  Swift Package Manager: FirebaseAuth, FirebaseFirestore), tested in `SyncTests` and against Firebase's local emulators
+  (`dev/run-emu.sh`, HANDOFF.md → Testing sync).
+- `Training/Model/Friends.swift` + `FriendsCloud.swift` + `UI/Friends/`: friends, profiles, gifts (tested in `FriendsTests`,
+  gift import checked against app.js's own code with `dev/gift-fixtures.js`).
+- Not done yet (later steps): exercises shared in the database and sharing your own, calendar,
   the YouTube video playing inside the app (it opens YouTube for now).

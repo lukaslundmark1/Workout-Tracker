@@ -6,11 +6,12 @@ struct SummaryView: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     let day: String
+    var g: String? = nil                   // one workout, or the whole day
     var open: (String) -> Void             // tap an exercise: open it on the exercise screen
     @State private var shown = false       // numbers count up and the check pops when it opens
 
     var body: some View {
-        let s = store.summary(day), u = store.units
+        let s = store.summary(day, g), u = store.units
         NavigationStack {
             ScrollView {
                 VStack(spacing: 0) {

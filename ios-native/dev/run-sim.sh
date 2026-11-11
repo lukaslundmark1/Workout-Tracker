@@ -6,7 +6,7 @@
 DD="${TMPDIR:-/tmp}/training-native-dd"
 cd "${0:A:h}/.."
 xcodebuild -project Training.xcodeproj -scheme Training -destination 'generic/platform=iOS Simulator' -derivedDataPath "$DD" build 2>&1 \
-  | grep -E "error|warning: |BUILD" | grep -v appintents | head -40
+  | grep -E "error: |warning: |BUILD" | grep -v appintents | head -40
 [[ ${pipestatus[1]} -ne 0 ]] && exit 1
 if [[ "$1" == "launch" ]]; then
   DEV="${2:-booted}"

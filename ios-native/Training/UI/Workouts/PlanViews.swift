@@ -16,6 +16,7 @@ struct PlanView: View {
     @State private var editing: PlanDraft?
     @State private var starting = false
     @State private var confirmEnd = false
+    @State private var sending = false
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,7 @@ struct PlanView: View {
         }
         .sheet(item: $editing) { d in PlanEditor(draft: d) { id in if id == nil { dismiss() } } }
         .sheet(isPresented: $starting) { PlanStartSheet(planId: planId) }
+        .sheet(isPresented: $sending) { if let p = store.planById(planId) { SendToSheet(item: .plan(p)) } }
     }
 
     private func content(_ p: Plan) -> some View {
@@ -65,6 +67,9 @@ struct PlanView: View {
                         .disabled(p.days.isEmpty)
                         .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 }
+            }
+            Section {
+                Button { Haptics.select(); sending = true } label: { Label("Send to a friend", systemImage: "paperplane") }
             }
         }
         .navigationTitle(p.name)

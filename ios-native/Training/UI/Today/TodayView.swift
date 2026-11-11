@@ -1,6 +1,11 @@
 import SwiftUI
 
-struct LogRoute: Hashable, Identifiable { var day: String; var exId: String; var id: String { day + "|" + exId } }
+struct LogRoute: Hashable, Identifiable {
+    var day: String; var exId: String; var g: String = otherGroup
+    var id: String { day + "|" + exId + "|" + g }
+}
+/// A workout group to move (opens the calendar)
+typealias MoveRoute = GroupKey
 
 /// The Today tab: month header, week strip, and the day itself, which you swipe left/right.
 struct TodayView: View {
@@ -10,8 +15,8 @@ struct TodayView: View {
     @State private var dayPos: Int? = 0
     @State private var weekPos: Int? = 0
     @State private var showAdd = false
-    @State private var finishFor: DayKey?
-    @State private var moveFor: DayKey?
+    @State private var finishFor: GroupKey?
+    @State private var moveFor: MoveRoute?
 
     private var firstDay: Int { store.data.settings.weekStart }
     private var baseWeek: String { Day0.weekStart(base, firstDay: firstDay) }
@@ -34,7 +39,7 @@ struct TodayView: View {
         .background(Color.bg)
         // The exercise screen slides up from the bottom; swipe it down (or tap ⌄) and it goes back down
         .sheet(item: $openLog) { r in
-            LogView(day: r.day, startExId: r.exId, startIndex: store.dayOf(r.day).items.firstIndex { $0.exId == r.exId } ?? 0)
+            LogView(day: r.day, startExId: r.exId, startIndex: store.dayOf(r.day).items.firstIndex { $0.exId == r.exId && $0.w == r.g } ?? 0)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(38)
@@ -57,14 +62,14 @@ struct TodayView: View {
                 if let exId { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openLog = LogRoute(day: store.selected, exId: exId) } }
             }
         }
-        .sheet(item: $finishFor) { d in FinishSheet(day: d.k) { _ in } }
-        .sheet(item: Binding(get: { store.summaryFor.map { DayKey(k: $0) } }, set: { store.summaryFor = $0?.k })) { d in
-            SummaryView(day: d.k) { exId in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openLog = LogRoute(day: d.k, exId: exId) }
+        .sheet(item: $finishFor) { r in FinishSheet(day: r.k, g: r.g) { _ in } }
+        .sheet(item: Binding(get: { store.summaryFor }, set: { store.summaryFor = $0 })) { r in
+            SummaryView(day: r.k, g: r.g) { exId in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openLog = LogRoute(day: r.k, exId: exId, g: r.g) }
             }
             .presentationDragIndicator(.visible)
         }
-        .sheet(item: $moveFor) { d in MoveBackSheet(day: d.k).presentationDetents([.large]) }
+        .sheet(item: $moveFor) { r in MoveSheet(from: r.k, group: r.g) }
         // Stored copies of planned days that no longer match the plan are dropped (like every redraw in the web app)
         .onChange(of: store.data) { store.purgeStalePlanDays() }
         .onAppear { store.purgeStalePlanDays() }
@@ -123,8 +128,8 @@ struct TodayView: View {
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
                 ForEach(-800...400, id: \.self) { off in
-                    DayPage(k: dayKey(off), onOpen: { openLog = $0 }, onAdd: { showAdd = true }, onFinish: { finishFor = DayKey(k: $0) },
-                            onMove: { moveFor = DayKey(k: $0) })
+                    DayPage(k: dayKey(off), onOpen: { openLog = $0 }, onAdd: { showAdd = true }, onFinish: { finishFor = $0 },
+                            onMove: { moveFor = $0 })
                         .containerRelativeFrame(.horizontal)
                 }
             }
@@ -145,8 +150,8 @@ struct DayPage: View {
     let k: String
     var onOpen: (LogRoute) -> Void
     var onAdd: () -> Void
-    var onFinish: (String) -> Void
-    var onMove: (String) -> Void
+    var onFinish: (GroupKey) -> Void
+    var onMove: (MoveRoute) -> Void
 
     var body: some View {
         let day = store.dayOf(k)
@@ -160,21 +165,21 @@ struct DayPage: View {
                     .font(.system(size: 15)).foregroundStyle(Color.label2)
                     .padding(.horizontal, 2).padding(.bottom, 14)
 
-                planButtons(day, logged)
-
                 if !day.items.isEmpty && (day.session != nil || logged) { progress(day) }
 
-                if day.items.isEmpty { empty } else { DayExerciseList(k: k, onOpen: onOpen) }
-
-                // Finish is how a workout ends (the timer only starts and pauses)
-                if !day.items.isEmpty && !store.isFinished(k) && (k == store.today || store.isRunning(k)) {
-                    Button { onFinish(k) } label: { Label("Finish workout", systemImage: "checkmark") }
-                        .buttonStyle(PrimaryButton())
-                        .padding(.top, 16)
+                if day.items.isEmpty { empty } else {
+                    VStack(spacing: 18) {
+                        ForEach(store.groups(k)) { g in
+                            WorkoutGroupView(k: k, group: g, onOpen: onOpen, onMove: { onMove(GroupKey(k: k, g: g.id)) },
+                                             onFinish: { onFinish(GroupKey(k: k, g: g.id)) })
+                                .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+                        }
+                    }
                 }
+
                 Button { onAdd() } label: { Label("Add exercise / workout", systemImage: "plus") }
                     .buttonStyle(TintedButton())
-                    .padding(.top, 14)
+                    .padding(.top, 20)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 120)
@@ -184,29 +189,6 @@ struct DayPage: View {
         .scrollDisabled(store.reordering)
     }
 
-    // Do X today / Do it today / Can't make it today (Move back a day) / Undo move / Undo
-    @ViewBuilder private func planButtons(_ day: Day, _ logged: Bool) -> some View {
-        let tk = store.today, pd = store.planDayFor(k), st = store.data.days[k]
-        let untouched = !logged && day.session == nil
-        let canRest = pd?.workout != nil && k >= tk && untouched && !(st != nil && st!.plan == nil && !st!.items.isEmpty) && st?.pinned != true
-        let canUnrest = k >= tk && st?.rest == true && st!.items.isEmpty && !logged
-        let canUnpin = k >= tk && st?.pinned == true && untouched
-        let nx = k == tk && store.todayIsFree && pd != nil && pd!.workout == nil && !pd!.extra ? store.upNext() : nil
-        let canDo = store.canDoToday(k)
-        let summary = store.isFinished(k) && logged
-        if summary || nx != nil || canDo || canRest || canUnrest || canUnpin {
-            HStack(spacing: 8) {
-                if summary { capsule("Workout summary", "chart.bar.fill") { Haptics.select(); store.summaryFor = k } }
-                if let nx { capsule("Do \(nx.workout.name) today", "play.fill") { Motion.run { store.pinToday() } } }
-                if canDo { capsule("Do it today", "checkmark") { Motion.run { store.doToday(k) } } }
-                if canRest { capsule(k == tk ? "Can't make it today" : "Move back a day", "arrow.right") { Haptics.select(); onMove(k) } }
-                if canUnrest { capsule("Undo move", "arrow.counterclockwise") { Haptics.select(); Motion.run { store.unrest(k) } } }
-                if canUnpin { capsule("Undo", "arrow.counterclockwise") { Haptics.select(); Motion.run { store.unpin(k) } } }
-            }
-            .padding(.top, -4).padding(.bottom, 14)
-            .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
-        }
-    }
     private func capsule(_ title: String, _ icon: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: icon)
@@ -219,21 +201,22 @@ struct DayPage: View {
     }
 
     private func progress(_ day: Day) -> some View {
-        let total = day.items.reduce(0) { $0 + max($1.sets ?? 0, store.setsOf($1.exId, k).count) }
-        let done = day.items.reduce(0) { $0 + store.setsOf($1.exId, k).count }
+        let done = { (it: WorkoutItem) in store.setsOf(it.exId, k, it.w ?? otherGroup).count }
+        let total = day.items.reduce(0) { $0 + max($1.sets ?? 0, done($1)) }
+        let doneAll = day.items.reduce(0) { $0 + done($1) }
         return Group {
             if total > 0 {
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.fill)
-                        Capsule().fill(done >= total ? Color.green : Color.tint)
-                            .frame(width: g.size.width * CGFloat(done) / CGFloat(total))
+                        Capsule().fill(doneAll >= total ? Color.green : Color.tint)
+                            .frame(width: g.size.width * CGFloat(doneAll) / CGFloat(total))
                     }
                 }
                 .frame(height: 5)
                 .padding(.horizontal, 2).padding(.top, -4).padding(.bottom, 16)
-                .animation(Motion.screen, value: done)
-                .accessibilityElement().accessibilityLabel("Sets done").accessibilityValue("\(done) of \(total)")
+                .animation(Motion.screen, value: doneAll)
+                .accessibilityElement().accessibilityLabel("Sets done").accessibilityValue("\(doneAll) of \(total)")
             }
         }
     }
@@ -287,13 +270,16 @@ struct CheckShape: Shape {
 }
 
 struct PrimaryButton: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity).frame(height: 52)
             .background(LinearGradient(colors: [Color.tint.mix(with: .white, by: 0.1), Color.tint], startPoint: .top, endPoint: .bottom), in: Capsule())
-            .shadow(color: Color.tint.opacity(0.35), radius: 10, y: 6)
+            .shadow(color: Color.tint.opacity(enabled ? 0.35 : 0), radius: 10, y: 6)
+            .opacity(enabled ? 1 : 0.45)
+            .animation(Motion.soft, value: enabled)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(configuration.isPressed ? .easeOut(duration: 0.12) : Motion.pop, value: configuration.isPressed)
     }

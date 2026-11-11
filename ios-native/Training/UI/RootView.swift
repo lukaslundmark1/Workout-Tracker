@@ -6,13 +6,15 @@ enum AppTab: Hashable { case friends, workouts, today, exercises, settings }
 /// The rest stopwatch, toasts and the number pad float above everything.
 struct RootView: View {
     @Environment(Store.self) private var store
+    @Environment(Cloud.self) private var cloud
 
     var body: some View {
         @Bindable var store = store
         TabView(selection: $store.tab) {
             Tab("Friends", systemImage: "person.2.fill", value: AppTab.friends) {
-                ComingSoon(title: "Friends", icon: "person.2.fill", text: "Friends, profiles and sending workouts come in a later step.")
+                FriendsView()
             }
+            .badge(cloud.friends.badge)
             Tab("Workouts", systemImage: "dumbbell.fill", value: AppTab.workouts) {
                 WorkoutsView()
             }

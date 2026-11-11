@@ -33,11 +33,11 @@ struct SetRow: View {
 
     private func field(_ f: PadField, _ value: String, placeholder: String, done: Bool) -> some View {
         let p = store.pad
-        let active = p != nil && p!.exId == m.ex.id && p!.day == m.k && p!.i == i && p!.field == f
+        let active = p != nil && p!.exId == m.ex.id && p!.g == m.g && p!.day == m.k && p!.i == i && p!.field == f
         let fresh = active && p!.fresh && !value.isEmpty
         let isBad = store.bad.contains(m.dkey + "|\(i)|\(f.rawValue)")
         return Button {
-            store.padOpen(m.k, m.ex.id, i, f)
+            store.padOpen(m.k, m.ex.id, i, f, group: m.g)
         } label: {
             Text(value.isEmpty ? placeholder : value)
                 .font(.rounded(18))

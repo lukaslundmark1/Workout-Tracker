@@ -37,11 +37,15 @@ nonisolated struct Exercise: Codable, Identifiable, Equatable {
 nonisolated struct WorkoutItem: Codable, Equatable {
     var exId: String
     var sets: Int?
-    init(exId: String, sets: Int?) { self.exId = exId; self.sets = sets }
+    /// On a day: which of the day's workouts the exercise belongs to (its workout id; "" = Other exercises).
+    /// Native app only; the web app keeps but ignores it. Missing on older days (worked out by `Store.normalized`).
+    var w: String?
+    init(exId: String, sets: Int?, w: String? = nil) { self.exId = exId; self.sets = sets; self.w = w }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         exId = try c.decode(String.self, forKey: .exId)
         sets = c.lenientInt(.sets)
+        w = try? c.decodeIfPresent(String.self, forKey: .w)
     }
 }
 
@@ -51,7 +55,12 @@ nonisolated struct Workout: Codable, Identifiable, Equatable {
     var items: [WorkoutItem]
 }
 
-nonisolated struct WorkoutRef: Codable, Equatable { var id: String; var name: String }
+nonisolated struct WorkoutRef: Codable, Equatable {
+    var id: String
+    var name: String
+    /// A plan workout moved here from its own day: it doesn't count as doing the plan early (native app only)
+    var moved: Bool?
+}
 nonisolated struct PlanRef: Codable, Equatable {
     var id: String; var index: Int
     init(id: String, index: Int) { self.id = id; self.index = index }
@@ -80,6 +89,10 @@ nonisolated struct Day: Codable, Equatable {
     var rest: Bool?
     var absorb: String?
     var session: Session?
+    /// The plan's workout for this day was moved away, to this date (native app only)
+    var away: String?
+    /// Each workout's own timer: group id → session (native app only). `session` then spans them all, for the web app.
+    var sessions: [String: Session]?
 
     init() {}
     init(from d: Decoder) throws {
@@ -91,6 +104,8 @@ nonisolated struct Day: Codable, Equatable {
         rest = try? c.decodeIfPresent(Bool.self, forKey: .rest)
         absorb = try? c.decodeIfPresent(String.self, forKey: .absorb)
         session = try? c.decodeIfPresent(Session.self, forKey: .session)
+        away = try? c.decodeIfPresent(String.self, forKey: .away)
+        sessions = try? c.decodeIfPresent([String: Session].self, forKey: .sessions)
     }
 }
 
@@ -103,9 +118,11 @@ nonisolated struct LoggedSet: Codable, Identifiable, Equatable {
     var weight: Double
     var reps: Int
     var ts: Double
+    /// Which of the day's workouts it was logged in (see `WorkoutItem.w`). Missing on older sets.
+    var w: String?
 
-    init(id: String, exId: String, date: String, slot: Int, weight: Double, reps: Int, ts: Double) {
-        self.id = id; self.exId = exId; self.date = date; self.slot = slot; self.weight = weight; self.reps = reps; self.ts = ts
+    init(id: String, exId: String, date: String, slot: Int, weight: Double, reps: Int, ts: Double, w: String? = nil) {
+        self.id = id; self.exId = exId; self.date = date; self.slot = slot; self.weight = weight; self.reps = reps; self.ts = ts; self.w = w
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -116,6 +133,7 @@ nonisolated struct LoggedSet: Codable, Identifiable, Equatable {
         weight = c.lenientDouble(.weight) ?? 0
         reps = c.lenientInt(.reps) ?? 0
         ts = c.lenientDouble(.ts) ?? 0
+        w = try? c.decodeIfPresent(String.self, forKey: .w)
     }
 }
 

@@ -100,12 +100,12 @@ final class ReorderTests: XCTestCase {
         day.items = ["a", "b", "c"].map { WorkoutItem(exId: $0, sets: 3) }
         d.days["2026-11-11"] = day
         let s = Store(data: d, persist: false)
-        s.reorderExercises(in: "2026-11-11", ["c", "a", "b"])
+        s.reorderExercises(in: "2026-11-11", group: otherGroup, ["c", "a", "b"])
         XCTAssertEqual(s.data.days["2026-11-11"]?.items.map(\.exId), ["c", "a", "b"])
     }
 
     func testRemovingTheSameExerciseTwiceDoesNothing() {
-        // Quick taps: emptying a planned day makes it a moved rest day; a second "remove" mustn't bring the plan back
+        // Quick taps: emptying a planned day skips the plan's workout that day; a second "remove" mustn't bring it back
         var d = AppData()
         d.exercises = [Exercise(id: "a", name: "A"), Exercise(id: "b", name: "B")]
         d.workouts = [Workout(id: "w", name: "W", items: [WorkoutItem(exId: "a", sets: 3), WorkoutItem(exId: "b", sets: 3)])]
@@ -114,13 +114,23 @@ final class ReorderTests: XCTestCase {
         let s = Store(data: d, persist: false)
         s.today = "2026-11-11"
         XCTAssertEqual(s.dayOf("2026-11-11").items.count, 2)
-        s.removeExercise("a", from: "2026-11-11")
-        s.removeExercise("b", from: "2026-11-11")
+        s.removeExercise("a", group: "w", from: "2026-11-11")
+        s.removeExercise("b", group: "w", from: "2026-11-11")
         XCTAssertTrue(s.dayOf("2026-11-11").items.isEmpty)
-        XCTAssertEqual(s.data.days["2026-11-11"]?.rest, true)
-        s.removeExercise("b", from: "2026-11-11")          // the late second tap
-        s.removeExercise("a", from: "2026-11-11")
+        XCTAssertEqual(s.data.days["2026-11-11"]?.pinned, true)
+        s.removeExercise("b", group: "w", from: "2026-11-11")          // the late second tap
+        s.removeExercise("a", group: "w", from: "2026-11-11")
         XCTAssertTrue(s.dayOf("2026-11-11").items.isEmpty, "the exercises must not come back")
-        XCTAssertEqual(s.data.days["2026-11-11"]?.rest, true)
+        XCTAssertEqual(s.data.days["2026-11-11"]?.pinned, true)
+        XCTAssertEqual(s.planDayFor("2026-11-13")?.workout?.id, "w", "nothing else moves: the next round is on its day")
+    }
+
+    func testDraggingStopsAtTheWorkoutsEdge() {
+        var r = Reorder(id: "a", order: ["a", "b"])
+        _ = r.move(to: -200, heights: ["a": 60, "b": 60])
+        XCTAssertEqual(r.offset, 0, "can't go above the first place")
+        _ = r.move(to: 400, heights: ["a": 60, "b": 60])
+        XCTAssertEqual(r.order, ["b", "a"])
+        XCTAssertEqual(r.offset, 0, "can't go below the last place")
     }
 }

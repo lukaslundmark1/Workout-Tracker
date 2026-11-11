@@ -84,12 +84,14 @@ struct ProgressCard: View {
     @Environment(Store.self) private var store
     let exId: String
     let stat: StatKind
+    var ix: SetIndex? = nil              // someone else's sets (a friend's); nil = yours
     @AppStorage("tt.range") private var rangeRaw = ChartRange.all.rawValue
 
     private var range: ChartRange { ChartRange(rawValue: rangeRaw) ?? .all }
 
     var body: some View {
-        let all = store.series(exId, stat), pts = store.series(exId, stat, range), unit = store.statUnit(stat)
+        let x = ix ?? store.index
+        let all = x.series(exId, stat, store.units), pts = x.series(exId, stat, store.units, range, today: store.today), unit = store.statUnit(stat)
         VStack(alignment: .leading, spacing: 2) {
             if let last = all.last {
                 Text("Latest · \(Fmt.short(last.k))").font(.system(size: 15)).foregroundStyle(Color.label2)
@@ -222,16 +224,18 @@ func niceTicks(_ lo: Double, _ hi: Double, _ n: Int) -> [Double] {
 struct HistoryList: View {
     @Environment(Store.self) private var store
     let exId: String
+    var ix: SetIndex? = nil              // someone else's sets (a friend's); nil = yours
 
     var body: some View {
-        let dates = Array(store.exDates(exId).reversed()), prs = store.prSets(exId), u = store.units
+        let x = ix ?? store.index
+        let dates = Array((x.exDates[exId] ?? []).reversed()), prs = x.prSets(exId), u = store.units
         Text("History").font(.system(size: 20, weight: .bold)).padding(.horizontal, 4).padding(.top, 26).padding(.bottom, 8)
         if dates.isEmpty {
             Text("No sets logged yet.").foregroundStyle(Color.label2).frame(maxWidth: .infinity).padding(.vertical, 18).card()
         }
         LazyVStack(spacing: 10) {
             ForEach(dates, id: \.self) { k in
-                let ss = store.setsOf(exId, k)
+                let ss = x.byExDate[exId + "|" + k] ?? []
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Text(store.relDay(k)).fontWeight(.semibold)

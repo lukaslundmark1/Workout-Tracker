@@ -37,7 +37,7 @@ struct ToastView: View {
     var body: some View {
         ZStack {
             if let t = store.toast {
-                let (icon, color): (String, Color) = t.kind == .pr ? ("trophy.fill", .orange) : t.kind == .done ? ("checkmark", .green) : ("arrow.right", .tint)
+                let (icon, color): (String, Color) = t.kind == .pr ? ("trophy.fill", .orange) : t.kind == .done ? ("checkmark", .green) : t.kind == .gift ? ("gift.fill", .tint) : ("arrow.right", .tint)
                 HStack(spacing: 12) {
                     Image(systemName: icon)
                         .font(.system(size: 15, weight: .bold))

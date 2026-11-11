@@ -265,10 +265,32 @@ extension Store {
     // MARK: Progress and history
 
     /// One point per day the exercise was done
-    func series(_ exId: String, _ stat: StatKind) -> [StatPoint] {
-        let u = units
-        return exDates(exId).map { k in
-            let ss = setsOf(exId, k)
+    func series(_ exId: String, _ stat: StatKind) -> [StatPoint] { index.series(exId, stat, units) }
+    /// The chart's points for a range (the latest few months, or everything)
+    func series(_ exId: String, _ stat: StatKind, _ range: ChartRange) -> [StatPoint] {
+        let all = series(exId, stat)
+        guard let from = range.start(today) else { return all }
+        return all.filter { $0.k >= from }
+    }
+    func statUnit(_ s: StatKind) -> String { s == .reps ? "reps" : units.u }
+    /// Each day's PR set (best estimated 1RM beating every earlier day)
+    func prSets(_ exId: String) -> [String: String] { index.prSets(exId) }
+    /// "Today", "Yesterday", "Wed 4 Nov", or with the year when it isn't this year
+    func relDay(_ k: String) -> String {
+        let n = Day0.between(k, today)
+        if n == 0 { return "Today" }
+        if n == 1 { return "Yesterday" }
+        return Fmt.year(k) == Fmt.year(today) ? Fmt.short(k) : Fmt.dayYear(k)
+    }
+}
+
+
+/// Chart points and PRs from any set index (yours, or a friend's)
+extension SetIndex {
+    /// One point per day the exercise was done
+    func series(_ exId: String, _ stat: StatKind, _ u: Units) -> [StatPoint] {
+        return (exDates[exId] ?? []).map { k in
+            let ss = byExDate[exId + "|" + k] ?? []
             let v: Double, note: String
             switch stat {
             case .e1rm:
@@ -281,30 +303,21 @@ extension Store {
             return StatPoint(k: k, date: Day0.date(k), v: v, note: note)
         }
     }
-    /// The chart's points for a range (the latest few months, or everything)
-    func series(_ exId: String, _ stat: StatKind, _ range: ChartRange) -> [StatPoint] {
-        let all = series(exId, stat)
+    func series(_ exId: String, _ stat: StatKind, _ u: Units, _ range: ChartRange, today: String) -> [StatPoint] {
+        let all = series(exId, stat, u)
         guard let from = range.start(today) else { return all }
         return all.filter { $0.k >= from }
     }
-    func statUnit(_ s: StatKind) -> String { s == .reps ? "reps" : units.u }
     /// Each day's PR set (best estimated 1RM beating every earlier day), oldest → newest in one pass
     func prSets(_ exId: String) -> [String: String] {
         var out: [String: String] = [:], run: Double?
-        for k in exDates(exId) {
-            let ss = setsOf(exId, k)
+        for k in exDates[exId] ?? [] {
+            let ss = byExDate[exId + "|" + k] ?? []
             let top = ss.dropFirst().reduce(ss[0]) { e1rm($1) > e1rm($0) ? $1 : $0 }
             if let r = run, e1rm(top) > r + 1e-6 { out[k] = top.id }
             run = max(run ?? 0, e1rm(top))
         }
         return out
-    }
-    /// "Today", "Yesterday", "Wed 4 Nov", or with the year when it isn't this year
-    func relDay(_ k: String) -> String {
-        let n = Day0.between(k, today)
-        if n == 0 { return "Today" }
-        if n == 1 { return "Yesterday" }
-        return Fmt.year(k) == Fmt.year(today) ? Fmt.short(k) : Fmt.dayYear(k)
     }
 }
 
@@ -332,14 +345,15 @@ struct WorkoutSummary {
 }
 
 extension Store {
-    func summary(_ k: String) -> WorkoutSummary {
+    /// A workout's summary (`g`), or the whole day's (nil). PRs and "last time" are per exercise, as everywhere.
+    func summary(_ k: String, _ g: String? = nil) -> WorkoutSummary {
         let d = dayOf(k)
-        let ss = setsOn(k).sorted { $0.ts < $1.ts }
+        let ss = (g.map { groupSets(k, $0) } ?? setsOn(k)).sorted { $0.ts < $1.ts }
         // the day's order first, then anything else logged that day
         var exIds: [String] = []
-        for id in d.items.map(\.exId) + ss.map(\.exId) where !exIds.contains(id) && ss.contains(where: { $0.exId == id }) && exById(id) != nil { exIds.append(id) }
+        for id in d.items.filter({ g == nil || $0.w == g }).map(\.exId) + ss.map(\.exId) where !exIds.contains(id) && ss.contains(where: { $0.exId == id }) && exById(id) != nil { exIds.append(id) }
         let rows = exIds.map { id -> WorkoutSummary.ExRow in
-            let mine = setsOf(id, k)
+            let mine = g.map { setsOf(id, k, $0) } ?? setsOf(id, k)
             let best = mine.dropFirst().reduce(mine[0]) { e1rm($1) > e1rm($0) ? $1 : $0 }
             var delta = WorkoutSummary.Delta.first
             if let pk = prevDateOf(id, k) {
@@ -353,8 +367,9 @@ extension Store {
             guard let p = prFor(id, k) else { return nil }
             return .init(id: id, name: exById(id)!.name, now: p.now, prev: p.prev, set: p.set)
         }
-        let dur = d.session.flatMap { s in s.end.map { $0 - s.start } }
-        return WorkoutSummary(title: d.workouts.isEmpty ? "Custom workout" : d.workouts.map(\.name).joined(separator: " + "),
+        let dur: Double? = g.map { sessionOf(k, $0).flatMap { s in s.end.map { $0 - s.start } } } ?? (isFinished(k) ? dayDuration(k) : nil)
+        let name = g.flatMap { g in groups(k).first { $0.id == g }?.name }
+        return WorkoutSummary(title: name ?? (d.workouts.isEmpty ? "Custom workout" : d.workouts.map(\.name).joined(separator: " + ")),
                               durationMs: dur, sets: ss.count, volumeKg: ss.reduce(0) { $0 + $1.weight * Double($1.reps) },
                               exercises: rows, prs: prs)
     }

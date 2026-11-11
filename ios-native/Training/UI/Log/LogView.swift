@@ -7,7 +7,7 @@ struct LogView: View {
     let day: String
     let startExId: String
     @State private var pos: Int?
-    @State private var finishFor: DayKey?
+    @State private var finishFor: GroupKey?
 
     /// The page is known before the screen is drawn (setting it afterwards made the page dots spring in from the top)
     init(day: String, startExId: String, startIndex: Int) {
@@ -16,14 +16,16 @@ struct LogView: View {
     }
 
     private var items: [WorkoutItem] { store.dayOf(day).items }
+    /// The workout of the exercise on screen (the timer at the top is that workout's)
+    private var group: String { let it = items; let p = min(pos ?? 0, it.count - 1); return p >= 0 ? (it[p].w ?? otherGroup) : otherGroup }
 
     var body: some View {
         NavigationStack {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.exId) { i, _ in
-                        LogPage(day: day, idx: i, onFinish: { finishFor = DayKey(k: day) }, goTo: { exId in
-                            if let j = items.firstIndex(where: { $0.exId == exId }) { Motion.run(Motion.screen) { pos = j } }
+                    ForEach(Array(items.enumerated()), id: \.element.pageId) { i, _ in
+                        LogPage(day: day, idx: i, onFinish: { g in finishFor = GroupKey(k: day, g: g) }, goTo: { exId in
+                            if let j = items.firstIndex(where: { $0.exId == exId && $0.w == otherGroup }) { Motion.run(Motion.screen) { pos = j } }
                         })
                             .containerRelativeFrame(.horizontal)
                             .id(i)
@@ -43,7 +45,7 @@ struct LogView: View {
                     Button { dismiss() } label: { Image(systemName: "chevron.down") }
                         .accessibilityLabel("Close")
                 }
-                ToolbarItem(placement: .topBarTrailing) { TimerButton(day: day, onFinish: { finishFor = DayKey(k: day) }) }
+                ToolbarItem(placement: .topBarTrailing) { TimerButton(day: day, g: group, onFinish: { finishFor = GroupKey(k: day, g: group) }) }
             }
         }
         .onAppear { store.logOpen = true }
@@ -52,7 +54,7 @@ struct LogView: View {
         }
         .onDisappear { store.padClose(); store.logOpen = false }
         .onChange(of: items.count) { _, n in if n == 0 { dismiss() } else if let p = pos, p >= n { pos = n - 1 } }
-        .sheet(item: $finishFor) { d in FinishSheet(day: d.k) { finished in if finished { dismiss() } } }
+        .sheet(item: $finishFor) { r in FinishSheet(day: r.k, g: r.g) { finished in if finished { dismiss() } } }
     }
 
     // Page dots, the rest stopwatch and the number pad, at the bottom of the screen
@@ -101,15 +103,13 @@ struct LogView: View {
 struct TimerButton: View {
     @Environment(Store.self) private var store
     let day: String
+    let g: String
     var onFinish: () -> Void
 
     var body: some View {
-        let s = store.dayOf(day).session
+        let s = store.sessionOf(day, g)
         if s == nil && day != store.today {
-            // no timer when filling in another day; a workout you could do today instead offers that
-            if store.canDoToday(day) {
-                Button { Motion.run { store.doToday(day) } } label: { Text("Do it today") }.font(.system(size: 15, weight: .semibold))
-            }
+            // no timer when filling in another day
         } else if let s, let end = s.end {
             Button { onFinish() } label: {
                 HStack(spacing: 5) { Image(systemName: "checkmark"); Text(Fmt.mins(end - s.start)) }.foregroundStyle(Color.green)   // (toolbars drop a Label's text)
@@ -118,8 +118,8 @@ struct TimerButton: View {
             .accessibilityLabel("Workout finished, tap to change duration")
         } else if s != nil {
             // Running: tap to pause; paused: tap to carry on. (Finish workout ends it.)
-            let paused = store.isPaused(day)
-            Button { withAnimation(Motion.pop) { store.tapTimer(day) } } label: {
+            let paused = store.isPaused(day, g)
+            Button { withAnimation(Motion.pop) { store.tapTimer(day, g) } } label: {
                 HStack(spacing: 6) {
                     if paused {
                         Image(systemName: "pause.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(Color.orange)
@@ -130,18 +130,23 @@ struct TimerButton: View {
                             .transition(.scale.combined(with: .opacity))
                     }
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        Text(Fmt.dur(store.elapsed(day))).font(.rounded(15)).monospacedDigit()
+                        Text(Fmt.dur(store.elapsed(day, g))).font(.rounded(15)).monospacedDigit()
                             .foregroundStyle(paused ? Color.label2 : Color.primary)
                     }
                 }
             }
             .accessibilityLabel(paused ? "Timer paused, tap to carry on" : "Session time, tap to pause")
         } else {
-            Button { store.startTimer(day) } label: { HStack(spacing: 5) { Image(systemName: "timer"); Text("Start") } }
+            Button { store.startTimer(day, g) } label: { HStack(spacing: 5) { Image(systemName: "timer"); Text("Start") } }
                 .font(.rounded(15))
                 .accessibilityLabel("Start session timer")
         }
     }
+}
+
+extension WorkoutItem {
+    /// Tells pages apart when an exercise is in two workouts on one day
+    var pageId: String { exId + "|" + (w ?? otherGroup) }
 }
 
 /// Where each set row is on screen (kept out of SwiftUI state so scrolling doesn't redraw anything).
@@ -152,7 +157,7 @@ struct LogPage: View {
     @Environment(Store.self) private var store
     let day: String
     let idx: Int
-    var onFinish: () -> Void
+    var onFinish: (String) -> Void          // finish this page's workout
     var goTo: (String) -> Void
     @State private var frames = RowFrames()
     @State private var editNote = false
@@ -167,7 +172,7 @@ struct LogPage: View {
                         .contentShape(Rectangle())
                         .onTapGesture { store.padClose() }   // tapping outside the pad and the fields puts it away
                         .padding(.horizontal, 16)
-                        .padding(.bottom, store.pad?.exId == m.ex.id ? 430 : 140)
+                        .padding(.bottom, store.pad?.exId == m.ex.id && store.pad?.g == m.g ? 430 : 140)
                 }
                 .scrollIndicators(.hidden)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.viewport = $0 }
@@ -185,7 +190,7 @@ struct LogPage: View {
 
     // Keep the field you're typing in visible above the number pad
     private func reveal(_ p: PadState?, _ m: LogModel, _ proxy: ScrollViewProxy) {
-        guard let p, p.exId == m.ex.id, p.day == day, let row = frames.rows[p.i] else { return }
+        guard let p, p.exId == m.ex.id, p.g == m.g, p.day == day, let row = frames.rows[p.i] else { return }
         let vp = frames.viewport
         let padTop = store.screen.height - NumberPad.height - store.screen.safeBottom - 8 - 14
         let topLimit = vp.minY + 10
@@ -199,7 +204,8 @@ struct LogPage: View {
         let u = store.units
         let pr = store.prFor(m.ex.id, day)
         VStack(alignment: .leading, spacing: 0) {
-            Text("Exercise \(m.idx + 1) of \(m.total)")
+            let gs = store.groups(day)
+            Text("Exercise \(m.idx + 1) of \(m.total)" + (gs.count > 1 ? " · " + (gs.first { $0.id == m.g }?.name ?? "") : ""))
                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.label2)
                 .padding(.horizontal, 2).padding(.top, 6)
             Text(m.ex.name)
@@ -297,8 +303,10 @@ struct LogPage: View {
             .padding(.top, 16)
 
             let isLast = m.idx == m.total - 1
-            if (store.canFinish(day) || (day == store.today && !store.isFinished(day))) && (isLast || store.setsLeft(day) == 0) {
-                Button { onFinish() } label: { Label("Finish workout", systemImage: "checkmark") }
+            let lastOfWorkout = !m.day.items.indices.contains { $0 > m.idx && m.day.items[$0].w == m.g }
+            if (store.canFinish(day, m.g) || (day == store.today && !store.isFinished(day, m.g))) && (lastOfWorkout || store.setsLeft(day, m.g) == 0) {
+                let name = store.groups(day).count > 1 && m.g != otherGroup ? (store.groups(day).first { $0.id == m.g }?.name ?? "workout") : "workout"
+                Button { onFinish(m.g) } label: { Label("Finish \(name)", systemImage: "checkmark") }
                     .buttonStyle(PrimaryButton())
                     .padding(.top, 22)
             }

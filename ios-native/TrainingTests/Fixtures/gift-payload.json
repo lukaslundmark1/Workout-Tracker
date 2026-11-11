@@ -1,0 +1,18 @@
+{"codes": ["abc-123", " xy z9 8k!7", "ab", "ABCDEFGH"],
+ "workout": {"name": "  Push  ", "items": [
+   {"ex": {"name": "bench press", "track": ["weight", "reps"], "muscle": "chest", "lib": ""}, "sets": "4"},
+   {"ex": {"name": "Deadlift", "lib": "b:deadlift", "muscle": "back", "equip": "barbell", "instructions": "  Hinge.  ", "video": "https://youtu.be/abcdefghijk"}, "sets": 0},
+   {"ex": {"name": "Weird lift", "lib": "s:nope", "muscle": "toes", "equip": "spoon", "video": "https://example.com/v", "track": ["time", "reps"]}, "sets": 12},
+   {"ex": {"name": "weird LIFT"}, "sets": 2.7},
+   {"ex": {"name": ""}, "sets": null},
+   {"ex": "", "sets": 3},
+   {"sets": 3},
+   null,
+   {"ex": {"name": "Squat", "lib": "b:backsquat"}, "sets": "abc"}
+ ]},
+ "plan": {"name": "ppl", "weeks": "8", "workouts": [
+   {"name": "Push", "items": [{"ex": {"name": "Dips"}, "sets": 3}]},
+   null,
+   {"name": "Legs", "items": [{"ex": {"name": "squat"}, "sets": -2}]}
+ ], "days": [{"w": 0}, {"w": -1}, {"w": 5}, {"w": "2"}, {"w": 1}, null, {"w": 1.5}, {}]}
+}

@@ -6,6 +6,7 @@ struct FinishSheet: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     let day: String
+    let g: String                      // which workout on the day
     var done: (Bool) -> Void
     @State private var logRest: Bool?
     @State private var h = 0
@@ -17,13 +18,13 @@ struct FinishSheet: View {
         var ranLong: Bool, lastTs: Double?, endAt: Double, mins: Int, session: Session?
     }
     private func calc() -> Calc {
-        let s = store.dayOf(day).session
+        let s = store.sessionOf(day, g)
         let editing = s?.end != nil
-        let logged = store.setsOn(day)
-        let unticked = editing ? [] : store.untickedSets(day)
+        let logged = store.groupSets(day, g)
+        let unticked = editing ? [] : store.untickedSets(day, g)
         let ok = unticked.filter { $0.w != nil && $0.r != nil }
         let firstTs = logged.map(\.ts).min(), lastTs = logged.map(\.ts).max()
-        let now = store.clock(day)          // a paused timer counts up to when it was paused
+        let now = store.clock(day, g)       // a paused timer counts up to when it was paused
         let ranLong = !editing && lastTs != nil && now - lastTs! > 15 * 60000 && (s == nil || lastTs! > s!.start)
         let endAt = editing ? s!.end! : ranLong ? lastTs! : now
         let ms: Double = s != nil ? endAt - s!.start : (firstTs != nil && (day == store.today || ranLong)) ? endAt - firstTs! : 0
@@ -76,7 +77,7 @@ struct FinishSheet: View {
                     .onChange(of: m) { if ready { Haptics.select() } }
 
                     if c.editing && day == store.today {
-                        Button { store.resume(day); Haptics.select(); dismiss() } label: { Label("Resume workout", systemImage: "play.fill") }
+                        Button { store.resume(day, g); Haptics.select(); dismiss() } label: { Label("Resume workout", systemImage: "play.fill") }
                             .buttonStyle(TintedButton()).padding(.top, 14)
                         footnote("Pressed Finish too early, or training again later today? The timer carries on from where it was.")
                             .multilineTextAlignment(.center).frame(maxWidth: .infinity)
@@ -85,7 +86,7 @@ struct FinishSheet: View {
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 30)
             }
             .background(Color(uiColor: .secondarySystemBackground))
-            .navigationTitle(c.editing ? "Duration" : "Finish workout")
+            .navigationTitle(c.editing ? "Duration" : "Finish \(store.groups(day).first { $0.id == g }.map { $0.id == otherGroup ? "workout" : $0.name } ?? "workout")")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -111,20 +112,20 @@ struct FinishSheet: View {
     private func save(_ c: Calc, _ logIt: Bool) {
         let total = Double(h * 60 + m) * 60000
         var d = store.data
-        if d.days[day] == nil { d.days[day] = store.virtualDay(day) ?? Day() }
+        d.days[day] = store.normalized(d.days[day] ?? store.virtualDay(day) ?? Day())
         if !c.editing && logIt {
             var ts = c.ranLong ? c.lastTs! + 1 : nowMs()
             for u in c.ok {
-                d.sets.append(LoggedSet(id: newId(), exId: u.exId, date: day, slot: u.slot, weight: store.units.fromU(u.w!), reps: u.r!, ts: ts))
+                d.sets.append(LoggedSet(id: newId(), exId: u.exId, date: day, slot: u.slot, weight: store.units.fromU(u.w!), reps: u.r!, ts: ts, w: u.g))
                 ts += 1
-                store.drafts[u.exId + "|" + day]?[u.slot] = nil
+                store.drafts[u.exId + "|" + day + "|" + u.g]?[u.slot] = nil
             }
         }
         // A running timer keeps its start and the duration sets the end; otherwise the duration counts back from the end
-        if let s = c.session, !c.editing { d.days[day]!.session = Session(start: s.start, end: s.start + total) }
-        else { let end = c.editing ? c.session!.end! : c.endAt; d.days[day]!.session = Session(start: end - total, end: end) }
+        if let s = c.session, !c.editing { store.setSession(day, g, Session(start: s.start, end: s.start + total), in: &d) }
+        else { let end = c.editing ? c.session!.end! : c.endAt; store.setSession(day, g, Session(start: end - total, end: end), in: &d) }
         store.padClose()
-        store.pausedAt[day] = nil
+        store.clearPause(day, g)
         Motion.run { store.data = d }
         if c.editing { Haptics.select(); dismiss(); done(false); return }
         Haptics.success()
@@ -132,7 +133,7 @@ struct FinishSheet: View {
         dismiss()
         done(true)
         // then the workout summary slides up (once this sheet, and the exercise screen if it was open, have gone)
-        if store.hasSets(day) { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { store.summaryFor = day } }
+        if !store.groupSets(day, g).isEmpty { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { store.summaryFor = GroupKey(k: day, g: g) } }
     }
 }
 
@@ -159,21 +160,29 @@ struct AddSheet: View {
                 if mode == 0 && !exercisesOnly && !store.data.workouts.isEmpty {
                     let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
                     let list = store.workoutsSorted.filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q) }
+                    let onDay = Set(store.dayOf(day).workouts.map(\.id))
                     if list.isEmpty { Text("No workouts match “\(q)”.").foregroundStyle(Color.label2) }
                     ForEach(list) { w in
                         Button {
                             Motion.run { store.addWorkout(w.id, to: day) }
                             dismiss(); onAdded(nil)
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(w.name).foregroundStyle(Color.primary)
-                                Text(w.items.compactMap { store.exById($0.exId)?.name }.joined(separator: ", "))
-                                    .font(.subheadline).foregroundStyle(Color.label2).lineLimit(1)
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(w.name).foregroundStyle(Color.primary)
+                                    Text(w.items.compactMap { store.exById($0.exId)?.name }.joined(separator: ", "))
+                                        .font(.subheadline).foregroundStyle(Color.label2).lineLimit(1)
+                                }
+                                if onDay.contains(w.id) {
+                                    Spacer()
+                                    Image(systemName: "checkmark").foregroundStyle(Color.tint).accessibilityLabel("On this day")
+                                }
                             }
                         }
+                        .disabled(onDay.contains(w.id))
                     }
                 } else {
-                    let have = Set(store.dayOf(day).items.map(\.exId))
+                    let have = Set(store.dayOf(day).items.filter { $0.w == otherGroup }.map(\.exId))
                     let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
                     Section {
                         Button { browsing = true } label: { Label("Browse exercise database", systemImage: "plus.circle.fill") }
@@ -272,39 +281,91 @@ struct NoteSheet: View {
     }
 }
 
-/// Settings for the prototype: units, week start, appearance, backups, and starting over with the sample data.
+/// Settings: account and sync, preferences, backups (the web app's Settings tab).
 struct SettingsView: View {
     @Environment(Store.self) private var store
+    @Environment(Cloud.self) private var cloud
     @State private var confirmReset = false
     @State private var picking = false
     @State private var pending: AppData?
     @State private var importError = ""
     @State private var exportURL: URL?
+    @State private var sheet: AccountSheet?
+
+    enum AccountSheet: String, Identifiable { case signIn, signOut, delete; var id: String { rawValue } }
 
     var body: some View {
         @Bindable var s = store
+        let signedIn = cloud.user != nil
         NavigationStack {
             Form {
                 Section {
+                    HStack(spacing: 14) {
+                        Text(String(store.data.settings.name.trimmingCharacters(in: .whitespaces).first ?? "?").uppercased())
+                            .font(.rounded(22)).foregroundStyle(.white)
+                            .frame(width: 46, height: 46)
+                            .background(LinearGradient(colors: [Color.tint.mix(with: .white, by: 0.15), Color.tint], startPoint: .top, endPoint: .bottom), in: Circle())
+                        TextField("Your name", text: $s.data.settings.name)
+                            .font(.system(size: 20, weight: .semibold))
+                            .textContentType(.name)
+                            .onChange(of: store.data.settings.name) { _, n in if n.count > 40 { s.data.settings.name = String(n.prefix(40)) } }
+                    }
+                    .padding(.vertical, 4)
+                    if let u = cloud.user {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Account")
+                                Text(u.email.isEmpty ? (u.name ?? "Signed in") : u.email)
+                                    .font(.subheadline).foregroundStyle(Color.label2).lineLimit(1).truncationMode(.middle)
+                            }
+                            Spacer(minLength: 12)
+                            SyncBadge(status: cloud.status, text: cloud.statusText)
+                        }
+                        Button("Sign out", role: .destructive) { Haptics.select(); sheet = .signOut }
+                    } else {
+                        Button { Haptics.select(); sheet = .signIn } label: {
+                            Label("Sign in to back up and sync", systemImage: "person.crop.circle.badge.plus")
+                        }
+                        .disabled(!cloud.available)
+                    }
+                } footer: {
+                    if case .error = cloud.status, signedIn { Text(cloud.statusText).foregroundStyle(Color.red) }
+                    else if !cloud.available { Text("Sign-in needs one more setup step in this build (the Firebase file GoogleService-Info.plist).") }
+                }
+                Section {
                     Picker("Units", selection: $s.data.settings.units) { Text("kg").tag("metric"); Text("lb").tag("imperial") }
-                    Picker("Week starts on", selection: $s.data.settings.weekStart) { Text("Monday").tag(1); Text("Sunday").tag(0) }
                     Picker("Appearance", selection: $s.data.settings.theme) { Text("Auto").tag("system"); Text("Light").tag("light"); Text("Dark").tag("dark") }
+                    Picker("Week starts on", selection: $s.data.settings.weekStart) { Text("Monday").tag(1); Text("Sunday").tag(0) }
+                    Stepper(value: $s.data.settings.defaultSets, in: 1...10) {
+                        HStack { Text("Default sets"); Spacer(); Text("\(store.data.settings.defaultSets)").foregroundStyle(Color.label2).monospacedDigit() }
+                    }
+                } header: { Text("Preferences") } footer: {
+                    Text("Default sets is used when you add a single exercise to a day or to a workout.")
                 }
                 Section {
                     if let url = exportURL {
                         ShareLink(item: url) { Text("Export backup") }
                     }
                     Button("Import backup") { importError = ""; picking = true }
-                } footer: {
-                    Text(importError.isEmpty
-                         ? "A backup exported from the Training web app (Settings → Export backup) loads here, so you can try this app with your own training. Importing replaces what's in this prototype; your account isn't touched."
-                         : importError)
+                } header: { Text("Data") } footer: {
+                    Text(!importError.isEmpty ? importError
+                         : signedIn ? "Your workouts are backed up to your account and synced between your devices. Importing a backup replaces everything, in your account too."
+                         : "You're not signed in, so your workouts are stored only on this phone. A backup exported from the Training web app (Settings → Export backup) loads here.")
                         .foregroundStyle(importError.isEmpty ? Color.label2 : Color.red)
                 }
-                Section {
-                    Button("Start over with the sample data", role: .destructive) { Haptics.warn(); confirmReset = true }
-                } footer: {
-                    Text("This is a prototype to compare how a fully native app feels. Everything is stored only on this phone. Sign-in, sync and the other tabs come in later steps.")
+                if !signedIn && UserDefaults.standard.string(forKey: Store.ownerKey) == nil {
+                    Section {
+                        Button("Start over with the sample data", role: .destructive) { Haptics.warn(); confirmReset = true }
+                    } footer: {
+                        Text("This is a prototype to compare how a fully native app feels. The sample training stays on this phone: signing in starts from your account's own training.")
+                    }
+                }
+                if signedIn {
+                    Section {
+                        Button("Delete account", role: .destructive) { Haptics.select(); sheet = .delete }
+                    } footer: {
+                        Text("Permanently deletes your account and everything stored about you in the cloud.")
+                    }
                 }
             }
             .navigationTitle("Settings")
@@ -327,10 +388,45 @@ struct SettingsView: View {
                     pending = nil
                 }
             } message: {
-                if let d = pending { Text("\(Fmt.plural(d.exercises.count, "exercise")), \(Fmt.plural(d.sets.count, "set")) and \(Fmt.plural(d.workouts.count, "workout")).") }
+                if let d = pending { Text("\(Fmt.plural(d.exercises.count, "exercise")), \(Fmt.plural(d.sets.count, "set")) and \(Fmt.plural(d.workouts.count, "workout"))." + (signedIn ? " This also replaces what's in your account." : "")) }
             }
-            .onChange(of: store.data.settings) { Haptics.select() }
+            .onChange(of: store.data.settings.units) { Haptics.select() }
+            .onChange(of: store.data.settings.theme) { Haptics.select() }
+            .onChange(of: store.data.settings.weekStart) { Haptics.select() }
+            .onChange(of: store.data.settings.defaultSets) { Haptics.select() }
             .onAppear { exportURL = store.exportBackupFile() }
+            .sheet(item: $sheet) { which in
+                switch which {
+                case .signIn: SignInSheet()
+                case .signOut: SignOutSheet()
+                case .delete: DeleteAccountSheet()
+                }
+            }
         }
+    }
+}
+
+/// "Backed up" (green), "Syncing…", "Offline — will sync later" next to the account
+private struct SyncBadge: View {
+    let status: Cloud.Status
+    let text: String
+    var body: some View {
+        let color: Color = switch status {
+        case .synced: .green
+        case .error: .red
+        case .offline: .orange
+        default: Color.label2
+        }
+        HStack(spacing: 5) {
+            if status == .syncing || status == .connecting { ProgressView().controlSize(.mini) }
+            else { Image(systemName: status == .synced ? "checkmark.icloud.fill" : status == .offline ? "icloud.slash" : "exclamationmark.icloud") }
+            Text(text.hasPrefix("Sync problem") ? "Sync problem" : text).lineLimit(1)
+        }
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(color)
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(color.opacity(0.12), in: Capsule())
+        .contentTransition(.opacity)
+        .animation(Motion.soft, value: status)
     }
 }
