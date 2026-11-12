@@ -147,10 +147,36 @@ extension Color {
     static let popCard = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.173, green: 0.173, blue: 0.18, alpha: 1) : .white })
 }
 
+extension EnvironmentValues {
+    /// Set inside a `PopUpHost`: closes the pop-up (views use it instead of `dismiss`, which would close the page)
+    @Entry var popUpClose: (() -> Void)? = nil
+}
+
+extension View {
+    /// Inside a `PopUpHost`, makes the pop-up as tall as `contentH` (its measured content) plus the title bar,
+    /// up to `max`; in a real sheet it does nothing (the sheet's detents decide).
+    func popUpHeight(_ contentH: CGFloat, max: CGFloat = 640) -> some View { modifier(PopUpHeight(contentH: contentH, max: max)) }
+}
+
+private struct PopUpHeight: ViewModifier {
+    @Environment(\.popUpClose) private var popUpClose
+    let contentH: CGFloat, max: CGFloat
+    func body(content: Content) -> some View {
+        if popUpClose != nil {
+            content
+                .frame(height: contentH > 0 ? min(contentH + 64 + 20, max) : 380)    // + title bar, + room for the home bar
+                .animation(Motion.reduced ? nil : Motion.sheet, value: contentH)
+        } else {
+            content
+        }
+    }
+}
+
 /// Shows `content` as a pop-up floating at the bottom of the page while `item` is set.
 struct PopUpHost<Item: Identifiable, Content: View>: View {
+    init(item: Binding<Item?>, @ViewBuilder content: @escaping (Item) -> Content) { _item = item; self.content = content }
     @Binding var item: Item?
-    @ViewBuilder var content: (Item) -> Content
+    var content: (Item) -> Content
     @State private var drag: CGFloat = 0
     @Environment(\.colorScheme) private var scheme
 
@@ -166,6 +192,7 @@ struct PopUpHost<Item: Identifiable, Content: View>: View {
                 .accessibilityHidden(true)
             if let it = item {
                 content(it)
+                    .environment(\.popUpClose, { close() })
                     .background(Color.popBg)
                     .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
                     .shadow(color: .black.opacity(0.18), radius: 20, y: 4)
@@ -183,7 +210,42 @@ struct PopUpHost<Item: Identifiable, Content: View>: View {
                     .id(it.id)
             }
         }
-        .ignoresSafeArea(edges: .bottom)
+        .ignoresSafeArea(.container, edges: .bottom)    // not the keyboard: the note pop-up rides up above it
         .animation(anim, value: item == nil)
+    }
+}
+
+extension PopUpHost where Item == PopUpFlag {
+    /// For a pop-up switched by a Bool
+    init(isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) {
+        self.init(item: Binding(get: { isPresented.wrappedValue ? PopUpFlag() : nil }, set: { isPresented.wrappedValue = $0 != nil })) { _ in content() }
+    }
+}
+struct PopUpFlag: Identifiable { var id: Int { 0 } }
+
+/// The title bar of a pop-up drawn by a page: ✕ on the left, the title, ✓ on the right (like a sheet's toolbar).
+struct PopUpBar: View {
+    let title: String
+    var cancel: () -> Void
+    var confirmLabel: String = "Save"
+    var confirm: (() -> Void)? = nil
+    var body: some View {
+        HStack {
+            Button(action: cancel) {
+                Image(systemName: "xmark").font(.system(size: 17, weight: .semibold)).frame(width: 30, height: 30)
+            }
+            .buttonStyle(.glass).buttonBorderShape(.circle)
+            .accessibilityLabel("Cancel")
+            Spacer()
+            if let confirm {
+                Button(action: confirm) {
+                    Image(systemName: "checkmark").font(.system(size: 17, weight: .semibold)).frame(width: 30, height: 30)
+                }
+                .buttonStyle(.glassProminent).buttonBorderShape(.circle)
+                .accessibilityLabel(confirmLabel)
+            }
+        }
+        .overlay { Text(title).font(.headline).lineLimit(1).padding(.horizontal, 70) }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 12)
     }
 }

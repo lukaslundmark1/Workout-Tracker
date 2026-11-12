@@ -8,9 +8,9 @@ struct FinishSheet: View {
     let day: String
     let g: String                      // which workout on the day
     var done: (Bool) -> Void
-    /// Set when the page draws this as a pop-up (PopUpHost) instead of a sheet
-    var onClose: (() -> Void)? = nil
-    private func close() { if let onClose { onClose() } else { dismiss() } }
+    @Environment(\.popUpClose) private var popUpClose
+    private func close() { if let popUpClose { popUpClose() } else { dismiss() } }
+    @State private var wheels: Bool?          // the hour/minute wheels shown (open at first when changing a finished workout)
     @State private var logRest: Bool?
     @State private var h = 0
     @State private var m = 0
@@ -40,59 +40,23 @@ struct FinishSheet: View {
         let c = calc()
         let logIt = logRest ?? !c.ok.isEmpty
         let nothing = c.logged.isEmpty && !(logIt && !c.ok.isEmpty)
+        if popUpClose != nil {
+            // drawn by the exercise screen (PopUpHost): sized by its content, so showing the wheels grows it in one movement
+            VStack(spacing: 0) {
+                PopUpBar(title: title(c), cancel: close, confirmLabel: c.editing ? "Save duration" : "Finish workout") { save(c, logIt) }
+                inner(c, logIt, nothing)
+            }
+            .padding(.bottom, 20)          // room for the home bar
+            .onAppear { setUp() }
+        } else {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if !c.editing {
-                        Text("\(Fmt.plural(c.logged.count, "set")) logged\(c.unticked.isEmpty ? "" : " · \(Fmt.plural(c.unticked.count, "set")) not ticked")")
-                            .font(.system(size: 15)).foregroundStyle(Color.label2)
-                            .frame(maxWidth: .infinity).padding(.bottom, 12)
-                        if !c.ok.isEmpty {
-                            Toggle("Log the \(Fmt.plural(c.ok.count, "unticked set")) as shown", isOn: Binding(get: { logIt }, set: { Haptics.select(); logRest = $0 }))
-                                .tint(.green)
-                                .padding(.horizontal, 16).frame(minHeight: 52)
-                                .background(Color.popCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                            footnote("Uses the weight and reps shown in each row." + (c.unticked.count > c.ok.count ? " \(Fmt.plural(c.unticked.count - c.ok.count, "set")) without numbers will be skipped." : ""))
-                        }
-                        if nothing {
-                            footnote("No sets are logged, so this workout will show as empty. " + (c.ok.isEmpty ? "Tick the sets you did first." : "Tick the sets you did, or log them above."))
-                                .foregroundStyle(Color.red)
-                        }
-                        Text("Duration").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.label2)
-                            .textCase(.uppercase).padding(.horizontal, 16).padding(.top, 22).padding(.bottom, 6)
-                    }
-                    Text(c.ranLong
-                         ? "\(c.session.map { "Started \(Fmt.hm($0.start)) · " } ?? "")ends at your last set, \(Fmt.hm(c.lastTs!))"
-                         : "\(c.session.map { "Started \(Fmt.hm($0.start))" } ?? "The timer wasn't running") · adjust if needed")
-                        .font(.system(size: 15)).foregroundStyle(Color.label2)
-                        .padding(.horizontal, 6).padding(.bottom, 4)
-                    HStack(spacing: 0) {
-                        Picker("Hours", selection: $h) { ForEach(0..<10) { Text("\($0)").tag($0) } }
-                            .pickerStyle(.wheel).frame(width: 90, height: 150).clipped()
-                        Text("h").fontWeight(.semibold)
-                        Picker("Minutes", selection: $m) { ForEach(0..<60) { Text(String(format: "%02d", $0)).tag($0) } }
-                            .pickerStyle(.wheel).frame(width: 90, height: 150).clipped()
-                        Text("min").fontWeight(.semibold)
-                    }
-                    .font(.rounded(20))
-                    .frame(maxWidth: .infinity)
-                    // the wheels sit straight on the pop-up (no lighter box), like the Clock app's timer
-                    .onChange(of: h) { if ready { Haptics.select() } }
-                    .onChange(of: m) { if ready { Haptics.select() } }
-
-                    if c.editing && day == store.today {
-                        Button { store.resume(day, g); Haptics.select(); close() } label: { Label("Resume workout", systemImage: "play.fill") }
-                            .buttonStyle(TintedButton()).padding(.top, 14)
-                        footnote("Pressed Finish too early, or training again later today? The timer carries on from where it was.")
-                            .multilineTextAlignment(.center).frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
+                inner(c, logIt, nothing)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentH = $0 }
             }
             .scrollBounceBehavior(.basedOnSize)
             .background(Color.popBg)
-            .navigationTitle(c.editing ? "Duration" : "Finish \(store.groups(day).first { $0.id == g }.map { $0.id == otherGroup ? "workout" : $0.name } ?? "workout")")
+            .navigationTitle(title(c))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -107,12 +71,103 @@ struct FinishSheet: View {
         // a short pop-up, just as tall as what's in it (plus the title bar), floating over the screen (Lukas, 2026-11-12)
         .presentationDetents([contentH > 0 ? .height(min(contentH + 64, 760)) : .medium])
         .sheetColors()
-        .frame(height: onClose != nil ? (contentH > 0 ? min(contentH + 64 + 20, 780) : 440) : nil)   // + room for the home bar
-        .onAppear {
-            let c = calc()
-            h = min(9, c.mins / 60); m = c.mins % 60
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { ready = true }
+        .onAppear { setUp() }
         }
+    }
+
+    private func setUp() {
+        let c = calc()
+        h = min(9, c.mins / 60); m = c.mins % 60
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { ready = true }
+    }
+
+    private func title(_ c: Calc) -> String {
+        c.editing ? "Duration" : "Finish \(store.groups(day).first { $0.id == g }.map { $0.id == otherGroup ? "workout" : $0.name } ?? "workout")"
+    }
+
+    @ViewBuilder private func inner(_ c: Calc, _ logIt: Bool, _ nothing: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !c.editing {
+                Text("\(Fmt.plural(c.logged.count, "set")) logged\(c.unticked.isEmpty ? "" : " · \(Fmt.plural(c.unticked.count, "set")) not ticked")")
+                    .font(.system(size: 15)).foregroundStyle(Color.label2)
+                    .frame(maxWidth: .infinity).padding(.bottom, 12)
+                if !c.ok.isEmpty {
+                    Toggle("Log the \(Fmt.plural(c.ok.count, "unticked set")) as shown", isOn: Binding(get: { logIt }, set: { Haptics.select(); logRest = $0 }))
+                        .tint(.green)
+                        .padding(.horizontal, 16).frame(minHeight: 52)
+                        .background(Color.popCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    footnote("Uses the weight and reps shown in each row." + (c.unticked.count > c.ok.count ? " \(Fmt.plural(c.unticked.count - c.ok.count, "set")) without numbers will be skipped." : ""))
+                }
+                if nothing {
+                    footnote("No sets are logged, so this workout will show as empty. " + (c.ok.isEmpty ? "Tick the sets you did first." : "Tick the sets you did, or log them above."))
+                        .foregroundStyle(Color.red)
+                }
+            }
+            durationCard(c)
+                .padding(.top, c.editing ? 0 : 18)
+            if c.ranLong { footnote("Ends at your last set, \(Fmt.hm(c.lastTs!)).") }
+            else if c.session == nil { footnote("The timer wasn't running.") }
+
+            if c.editing && day == store.today {
+                Button { store.resume(day, g); Haptics.select(); close() } label: { Label("Resume workout", systemImage: "play.fill") }
+                    .buttonStyle(TintedButton()).padding(.top, 14)
+                footnote("Pressed Finish too early, or training again later today? The timer carries on from where it was.")
+                    .multilineTextAlignment(.center).frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
+    }
+
+    /// Duration, like an iOS Settings row: the value on the right; tap it to show the hour/minute wheels under it.
+    private func durationCard(_ c: Calc) -> some View {
+        let open = wheels ?? c.editing
+        return VStack(spacing: 0) {
+            Button {
+                Haptics.select()
+                Motion.run(Motion.sheet) { wheels = !open }
+            } label: {
+                HStack {
+                    Text(c.session.map { "Started \(Fmt.hm($0.start))" } ?? "Duration").foregroundStyle(.primary)
+                    Spacer()
+                    // two copies faded into each other: changing a Text's colour mid-animation redraws it apart from its capsule
+                    let value = h > 0 ? "\(h) h \(String(format: "%02d", m)) min" : "\(m) min"
+                    ZStack {
+                        Text(value).foregroundStyle(Color.primary).opacity(open ? 0 : 1)
+                        Text(value).foregroundStyle(Color.tint).opacity(open ? 1 : 0)
+                    }
+                        .font(.rounded(17, .medium)).monospacedDigit()
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Color.fill, in: Capsule())
+                }
+                .padding(.horizontal, 16).frame(minHeight: 52)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Duration, \(h) hours \(m) minutes")
+            .accessibilityHint(open ? "Hides the wheels" : "Shows wheels to change it")
+            if open {
+                Divider().padding(.leading, 16)
+                HStack(spacing: 0) {
+                    Picker("Hours", selection: $h) { ForEach(0..<10) { Text("\($0)").tag($0) } }
+                        .pickerStyle(.wheel).frame(width: 90, height: 140).clipped()
+                    Text("h").fontWeight(.semibold)
+                    Picker("Minutes", selection: $m) { ForEach(0..<60) { Text(String(format: "%02d", $0)).tag($0) } }
+                        .pickerStyle(.wheel).frame(width: 90, height: 140).clipped()
+                    Text("min").fontWeight(.semibold)
+                }
+                .font(.rounded(20))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                // the wheels (UIKit) jump to their place instead of moving with the card: fade them in once the card has
+                // nearly opened, and out quickly before it closes, so they never sit over the row
+                .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(Motion.reduced ? 0 : 0.22)),
+                                        removal: .opacity.animation(.easeOut(duration: 0.1))))
+            }
+        }
+        .background(Color.popCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .onChange(of: h) { if ready { Haptics.select() } }
+        .onChange(of: m) { if ready { Haptics.select() } }
     }
 
     private func footnote(_ t: String) -> some View {
@@ -259,6 +314,9 @@ struct NoteSheet: View {
     let exId: String
     @State private var text = ""
     @FocusState private var focused: Bool
+    @Environment(\.popUpClose) private var popUpClose
+    private func close() { if let popUpClose { popUpClose() } else { dismiss() } }
+    @State private var contentH: CGFloat = 0
 
     var body: some View {
         NavigationStack {
@@ -267,28 +325,31 @@ struct NoteSheet: View {
                     .lineLimit(3...6)
                     .focused($focused)
                     .padding(14)
-                    .background(Color.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(Color.popCard, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .onChange(of: text) { if text.count > 200 { text = String(text.prefix(200)) } }
                 Text("Only you can see this. It isn't sent with workouts or plans.")
                     .font(.footnote).foregroundStyle(Color.label2).padding(.horizontal, 6)
-                Spacer()
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
-            .background(Color.bg)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentH = $0 }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .background(Color.popBg)
             .navigationTitle(store.exById(exId)?.name ?? "Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }
+                    Button(role: .cancel) { close() } label: { Image(systemName: "xmark") }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(role: .confirm) { store.setNote(exId, text); Haptics.select(); dismiss() } label: { Image(systemName: "checkmark") }
+                    Button(role: .confirm) { store.setNote(exId, text); Haptics.select(); close() } label: { Image(systemName: "checkmark") }
                         .accessibilityLabel("Save")
                 }
             }
         }
         .presentationDetents([.medium])
         .sheetColors()
+        .popUpHeight(contentH)
         .onAppear { text = store.exById(exId)?.note ?? ""; focused = true }
     }
 }

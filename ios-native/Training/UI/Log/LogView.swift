@@ -8,6 +8,7 @@ struct LogView: View {
     let startExId: String
     @State private var pos: Int?
     @State private var finishFor: GroupKey?
+    @State private var popUp: LogPopUp?
 
     /// The page is known before the screen is drawn (setting it afterwards made the page dots spring in from the top)
     init(day: String, startExId: String, startIndex: Int) {
@@ -25,7 +26,7 @@ struct LogView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.pageId) { i, _ in
-                        LogPage(day: day, idx: i, onFinish: { g in finishFor = GroupKey(k: day, g: g) }, goTo: { exId in
+                        LogPage(day: day, idx: i, onFinish: { g in finishFor = GroupKey(k: day, g: g) }, openPopUp: { popUp = $0 }, goTo: { exId in
                             if let j = items.firstIndex(where: { $0.exId == exId && $0.w == otherGroup }) { Motion.run(Motion.screen) { pos = j } }
                         })
                             .containerRelativeFrame(.horizontal)
@@ -52,7 +53,15 @@ struct LogView: View {
         // drawn by the page, not a sheet: a sheet on top would turn this page grey (see PopUpHost)
         .overlay {
             PopUpHost(item: $finishFor) { r in
-                FinishSheet(day: r.k, g: r.g, done: { finished in if finished { dismiss() } }, onClose: { Motion.run(Motion.sheet) { finishFor = nil } })
+                FinishSheet(day: r.k, g: r.g) { finished in if finished { dismiss() } }
+            }
+        }
+        .overlay {
+            PopUpHost(item: $popUp) { p in
+                switch p {
+                case .note(let exId): NoteSheet(exId: exId)
+                case .video(let exId, let g): LinkVideoSheet(day: day, exId: exId, g: g)
+                }
             }
         }
         .pageColors()
@@ -155,6 +164,13 @@ struct TimerButton: View {
     }
 }
 
+/// The small pop-ups the exercise screen draws over itself
+enum LogPopUp: Identifiable {
+    case note(String)                 // exId
+    case video(String, String)        // exId, workout
+    var id: String { switch self { case .note(let e): "n" + e; case .video(let e, let g): "v" + e + g } }
+}
+
 extension WorkoutItem {
     /// Tells pages apart when an exercise is in two workouts on one day
     var pageId: String { exId + "|" + (w ?? otherGroup) }
@@ -169,10 +185,9 @@ struct LogPage: View {
     let day: String
     let idx: Int
     var onFinish: (String) -> Void          // finish this page's workout
+    var openPopUp: (LogPopUp) -> Void       // note / link video, drawn by the exercise screen (see PopUpHost)
     var goTo: (String) -> Void
     @State private var frames = RowFrames()
-    @State private var editNote = false
-    @State private var linkVideo = false
     @State private var showAdd = false
     @State private var history = false
 
@@ -191,8 +206,6 @@ struct LogPage: View {
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frames.viewport = $0 }
                 .onChange(of: store.pad) { _, p in reveal(p, m, proxy) }
             }
-            .sheet(isPresented: $editNote) { NoteSheet(exId: m.ex.id) }
-            .sheet(isPresented: $linkVideo) { LinkVideoSheet(day: day, exId: m.ex.id, g: m.g) }
             .sheet(isPresented: $history) { ExerciseDetail(exId: m.ex.id, mode: .history).presentationDragIndicator(.visible) }
             .sheet(isPresented: $showAdd) { AddSheet(day: day, exercisesOnly: true) { exId in
                 if let exId { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { goTo(exId) } }
@@ -202,8 +215,8 @@ struct LogPage: View {
         }
     }
 
-    private var linkVideoButton: some View {
-        Button { store.padClose(); linkVideo = true } label: { Label("Link video", systemImage: "video.badge.plus") }
+    private func linkVideoButton(_ m: LogModel) -> some View {
+        Button { store.padClose(); openPopUp(.video(m.ex.id, m.g)) } label: { Label("Link video", systemImage: "video.badge.plus") }
             .font(.system(size: 15, weight: .medium)).foregroundStyle(Color.tint)
             .buttonStyle(PressStyle())
     }
@@ -257,7 +270,7 @@ struct LogPage: View {
 
             // Note
             if let note = m.ex.note, !note.isEmpty {
-                Button { editNote = true } label: {
+                Button { store.padClose(); openPopUp(.note(m.ex.id)) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Image(systemName: "pencil").foregroundStyle(Color.label2)
                         Text(note).foregroundStyle(.primary).multilineTextAlignment(.leading)
@@ -271,12 +284,12 @@ struct LogPage: View {
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .padding(.top, -4).padding(.bottom, 10)
                 .accessibilityLabel("Note: \(note). Tap to edit")
-                linkVideoButton
+                linkVideoButton(m)
                     .padding(.horizontal, 6).padding(.bottom, 16)
             } else {
                 HStack(spacing: 22) {
-                    Button { editNote = true } label: { Label("Add a note", systemImage: "pencil") }
-                    linkVideoButton
+                    Button { store.padClose(); openPopUp(.note(m.ex.id)) } label: { Label("Add a note", systemImage: "pencil") }
+                    linkVideoButton(m)
                 }
                 .font(.system(size: 15, weight: .medium)).foregroundStyle(Color.tint)
                 .buttonStyle(PressStyle())

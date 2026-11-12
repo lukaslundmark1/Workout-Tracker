@@ -13,6 +13,9 @@ struct LinkVideoSheet: View {
     @State private var picking = false
     @State private var picked: [PhotosPickerItem] = []
     @State private var denied = false
+    @Environment(\.popUpClose) private var popUpClose
+    private func close() { if let popUpClose { popUpClose() } else { dismiss() } }
+    @State private var contentH: CGFloat = 0
 
     private var sets: [LoggedSet] { store.setsOf(exId, day, g).sorted { $0.slot < $1.slot } }
 
@@ -63,7 +66,7 @@ struct LinkVideoSheet: View {
                                 .accessibilityAddTraits(on ? .isSelected : [])
                             }
                         }
-                        .card()
+                        .background(Color.popCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
 
                         if denied {
@@ -83,8 +86,10 @@ struct LinkVideoSheet: View {
                     }
                 }
                 .padding(16)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentH = $0 }
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .scrollBounceBehavior(.basedOnSize)
+            .background(Color.popBg)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !sets.isEmpty {
                     Button { choose() } label: { Label("Choose from Photos", systemImage: "photo.on.rectangle") }
@@ -97,7 +102,7 @@ struct LinkVideoSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }
+                    Button(role: .cancel) { close() } label: { Image(systemName: "xmark") }
                 }
             }
             .photosPicker(isPresented: $picking, selection: $picked, maxSelectionCount: 10, selectionBehavior: .ordered,
@@ -111,12 +116,13 @@ struct LinkVideoSheet: View {
                 Haptics.success()
                 store.showToast(.init(kind: .done, title: locals.count == 1 ? "Video linked" : "\(locals.count) videos linked",
                                       sub: chosen.count == 1 ? "To set \((sets.first { chosen.contains($0.id) }?.slot ?? 0) + 1)" : "To \(chosen.count) sets"))
-                dismiss()
+                close()
             }
         }
         .presentationDetents([.medium, .large])
         .sheetColors()
         .presentationDragIndicator(.visible)
+        .popUpHeight(contentH + (sets.isEmpty ? 0 : 66), max: 620)    // + the Choose from Photos button
         .onAppear { if sets.count == 1 { chosen = [sets[0].id] } }   // just one set: it's that one
     }
 

@@ -26,17 +26,23 @@ Verified in the Simulator (dark + light, and frame by frame that sheets don't fl
 - A new sheet: pick `.pageColors()` if the web shows it as a page, else leave it (full height) or `.sheetColors()` (partial height).
   Don't use `secondarySystemBackground`/`tertiarySystemBackground` for sheet backgrounds or cards; use `Color.bg`/`Color.card`.
 - Menus (`Menu`, confirmation dialogs) are Apple's own glass and weren't changed.
-- **Finish / Duration pop-up (2026-11-12, Lukas picked it from two mock-ups):** a short pop-up, as tall as its content
-  (measured, `.height(content + 64)`), floating over the screen with `.sheetColors()`. The hour/minute wheels are 150 pt
-  tall and sit straight on the pop-up without a card (like the Clock app's timer). Full height looked grey over the black
-  exercise screen and left a big empty area; the rejected option was a full-height black page.
+- **Finish / Duration pop-up (2026-11-12, Lukas):** a short pop-up sized to its content. Duration is one row like an iOS
+  Settings row: "Started 20:36" on the left, the value in a capsule on the right ("1 h 05 min"); tapping it shows the
+  hour/minute wheels inside the same card (open at first when changing a finished workout's Duration, closed when
+  finishing). A footnote only when it ends at the last set or the timer wasn't running. Lukas had found the old layout
+  (header + sentence + loose wheels) clunky and the wheels too low.
+  Animation details (all checked frame by frame): the value text is two copies faded into each other (changing a Text's
+  colour mid-animation redraws it apart from its capsule); the wheels (UIKit) jump to their place instead of moving with
+  the card, so they fade in 0.22 s late and out fast.
 - **Pop-ups over the exercise screen aren't sheets:** iOS pushes a sheet back and switches it to lighter (elevated) colours
-  when another sheet opens on top of it, so the black exercise screen went grey behind the Duration pop-up (Lukas's screen
-  recording). SwiftUI can't turn that off (`presentationBackgroundInteraction` doesn't help). LogView now draws the Finish /
-  Duration pop-up itself with `PopUpHost` (UI/Theme.swift): it slides up, can be pulled down, closes on a tap outside and darkens
-  the page (black 50%, like the web's backdrop). It uses `Color.popBg` / `Color.popCard` (pop-up colours that don't depend on
-  the interface level). From Today it's still a normal sheet. Note / Link video / History opened from the exercise screen are
-  still sheets and will turn the page grey the same way; move them to `PopUpHost` if Lukas notices.
+  when another sheet opens on top of it, so the black exercise screen went grey behind them (Lukas's screen recording).
+  SwiftUI can't turn that off (`presentationBackgroundInteraction` doesn't help). LogView draws Finish / Duration, Note and
+  Link video itself with `PopUpHost` (UI/Theme.swift): slides up, pull down or tap outside to close, darkens the page
+  (black 50%, like the web's backdrop), rides above the keyboard. Views inside call `popUpClose` from the environment
+  instead of `dismiss` (which would close the exercise screen) and use `Color.popBg` / `Color.popCard` (pop-up colours
+  that don't depend on the interface level). Finish draws its own `PopUpBar` and sizes itself (so opening the wheels is
+  one movement); Note and Link video keep their NavigationStack and get a measured height (`.popUpHeight`). From Today,
+  Finish is still a normal sheet. History and Add exercise from the exercise screen are still full sheets.
 
 ## Where things stand
 - Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 69 unit tests pass. Lukas has the project
