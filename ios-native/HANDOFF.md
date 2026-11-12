@@ -1,6 +1,8 @@
-# Handoff: Training β (native SwiftUI app)
+# Handoff: Training β (native SwiftUI app), next up: a few small visual changes
 
-Updated 2026-11-12 (night) after a performance session (below). Before that, a feature session: calendar from the month
+Updated 2026-11-12 (night) after a performance session (below, committed as `a745eb9`). **Next session (Lukas): a few
+visual changes, minor things.** He'll say what; small UI changes are "just do them" (see his preferences at the end), then
+verify each in the Simulator, light + dark, frame by frame if it moves, and keep the performance rules below in mind. Before that, a feature session: calendar from the month
 name, videos linked to sets, History days open the exercise screen, video sound on silent, smooth kg ↔ Reps switch; and a polish session, Friends,
 accounts + sync and the day overhaul. **Read in this order:** `../CLAUDE.md` (how Lukas works), this file,
 `../docs/NATIVE-REBUILD.md` (the original plan and the data format), the "Fully native app" entries in
@@ -11,9 +13,8 @@ describe how the *web* app was made fast; the same ideas (index, caches, no work
 ## Where things stand
 - Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 69 unit tests pass. Lukas has the project
   open in Xcode with his Team set; he presses ▶ to put it on his iPhone (every native change needs ▶ again).
-- The polish and feature sessions (below), this file, `../docs/DECISIONS.md` and the Xcode-upgraded `project.pbxproj`
-  were committed on 2026-11-12 as "native: polish, calendar, videos on sets, History → day" (before perf work, so perf
-  changes get their own commit and are easy to compare / revert). **Nothing is pushed.** Pushing only publishes
+- `main` is at `a745eb9` "native: performance and battery" (before it: "native: polish, calendar, videos on sets, History
+  → day"). Everything is committed; **nothing is pushed.** Pushing only publishes
   the folder on GitHub Pages; it doesn't change the web app. Commit style: `native: <what>` + bullets.
 - `GoogleService-Info.plist` is in `Training/` (Lukas registered the iOS app in Firebase on 2026-11-11), so sign-in works.
   Whether he has signed in with his real account on the β app is unknown: ask before testing anything that would touch it.
@@ -87,9 +88,23 @@ Done (steps 0–4 of NATIVE-REBUILD §8, plus extras Lukas asked for):
 - Not done: shared exercise database (browse shared entries, "Share to the database" on your own), embedded YouTube player, Google sign-in (only if asked), `#add-CODE` invite links opening the β app (they open
   the web app; the β app would need associated domains).
 
-## Performance session (2026-11-12, not committed yet; details and numbers in ../docs/DECISIONS.md → "Fully native app: performance and battery")
+## Performance session (2026-11-12, commit `a745eb9`; details and numbers in ../docs/DECISIONS.md → "Fully native app: performance and battery")
 Lukas: nothing felt slow, but "animation performance could be better"; then: optimise everything with lots of fake data.
-Done, all verified in the Simulator (dark + light) and by tests; **not yet felt on his phone**: ask how it feels.
+Done, all verified in the Simulator (dark + light) and by tests; **not yet felt on his phone**: ask once how it feels
+(opening, swiping days, ticking, opening an exercise). ▶ now builds Release: if Xcode shows two "Training" schemes, the
+shared one is right.
+
+Rules for UI changes that keep it fast (learned this session):
+- Don't put an animation's state in the same view as something heavy (a Chart, a long list): the whole view re-renders
+  every frame. Give the animation its own small view (`DrawInCover` is the example).
+- No endless SwiftUI animations (phaseAnimator, repeatForever, symbol effects) on screens that stay open: they redraw every
+  frame and keep the display at full refresh. Use Core Animation (`PulseDot`) or nothing.
+- No lazy grids/stacks inside lazy stacks for small fixed content (calendar months are plain rows now). Don't make the Today
+  pagers' ForEach range big again; their windows recentre only when scrolling is idle.
+- Store lookups: use the cached helpers (`dayOf`, `setsOf`, `index`, `prevBest`); a new cache must be cleared in
+  `data.didSet` and call `access(keyPath: \.data)` when it answers without reading `data`.
+- After a visual change, a quick check that nothing regressed: `CONF=Release ./dev/run-sim.sh launch <UDID> -perfData 104
+  -perfLog 1` + the log stream (below) shows dropped frames and which views redrew.
 - **▶ builds Release** (`Training.xcodeproj/xcshareddata/xcschemes/Training.xcscheme`): the Debug build ran Swift and
   Firebase unoptimised, 2–5x slower. `dev/run-sim.sh` / `run-emu.sh` build Debug explicitly; `CONF=Release dev/run-sim.sh
   launch <UDID> [args]` builds what ▶ builds.
