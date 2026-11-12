@@ -325,14 +325,16 @@ final class Cloud {
         guard saveSyncTask == nil else { return }
         saveSyncTask = Task {
             try? await Task.sleep(for: .seconds(1.5))
-            saveSyncNow()
+            saveSyncNow(wait: false)
         }
     }
-    func saveSyncNow() {
+    /// `wait: false` encodes and writes in the background (thousands of hashes: several ms, off the main thread)
+    func saveSyncNow(wait: Bool = true) {
         saveSyncTask?.cancel(); saveSyncTask = nil
-        guard let user, let sync, let d = try? JSONEncoder().encode(sync) else { return }
-        try? d.write(to: Cloud.syncURL(user.uid), options: .atomic)
+        guard let user, let sync else { return }
+        syncWriter.write(Cloud.syncURL(user.uid), wait: wait) { try? JSONEncoder().encode(sync) }
     }
+    @ObservationIgnored private let syncWriter = FileWriter()
 
     // MARK: Leaving: sign out, delete account
 
@@ -349,7 +351,7 @@ final class Cloud {
     private func wipeDevice(_ uid: String) async {
         saveSyncTask?.cancel(); saveSyncTask = nil
         sync = nil; cache.clear()
-        try? FileManager.default.removeItem(at: Cloud.syncURL(uid))
+        syncWriter.remove(Cloud.syncURL(uid))
         store?.wipeDevice(uid)
         // Firestore keeps its own offline copy on the phone too
         let f = db

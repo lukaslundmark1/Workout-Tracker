@@ -8,6 +8,7 @@ struct ExercisesView: View {
     @State private var browsing = false
 
     var body: some View {
+        let _ = Perf.body("ExercisesView")
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let mine = store.data.exercises.filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q) }
             .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }

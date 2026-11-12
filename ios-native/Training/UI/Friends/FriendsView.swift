@@ -21,6 +21,7 @@ struct FriendsView: View {
     private var f: Friends { cloud.friends }
 
     var body: some View {
+        let _ = Perf.body("FriendsView")
         NavigationStack {
             List {
                 Section {

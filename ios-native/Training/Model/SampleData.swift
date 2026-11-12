@@ -3,7 +3,8 @@ import Foundation
 /// Made-up training for the prototype (no account or backup yet): eight weeks of Push / Pull / Legs,
 /// with Push planned for today so there's something to log.
 enum SampleData {
-    static func make(today: String = Day0.today) -> AppData {
+    /// `weeks`/`dense` make a bigger history for performance tests (`Perf`): dense trains 6 days a week, 4 sets each.
+    static func make(today: String = Day0.today, weeks: Int = 8, dense: Bool = false) -> AppData {
         var d = AppData()
         func ex(_ name: String, _ muscle: String, _ equip: String, _ instr: String = "", note: String? = nil) -> Exercise {
             Exercise(id: "b:" + name.lowercased().filter { $0.isLetter || $0.isNumber }, name: name, instructions: instr, muscle: muscle, equip: equip, note: note)
@@ -37,13 +38,15 @@ enum SampleData {
                         days: [PlanDay(workoutId: push.id), PlanDay(workoutId: nil), PlanDay(workoutId: pull.id),
                                PlanDay(workoutId: nil), PlanDay(workoutId: legs.id), PlanDay(workoutId: nil)])
         d.plans = [plan]
-        let begin = Day0.add(today, -56)
+        let begin = Day0.add(today, -weeks * 7)
         d.activePlan = ActivePlan(planId: plan.id, begin: begin, start: begin)
 
         let rotation = [push, pull, legs]
         var session = 0
-        var offset = -56
+        var offset = -weeks * 7
+        let setsEach = dense ? 4 : 3
         while offset < 0 {
+            if dense && (offset % 7 + 7) % 7 == 6 { offset += 1; continue }   // a rest day a week
             let k = Day0.add(today, offset)
             let w = rotation[session % 3]
             let round = session / 3
@@ -55,8 +58,8 @@ enum SampleData {
             for it in w.items {
                 day.items.append(it)
                 let (base, reps) = start[it.exId]!
-                let kg = base + Double(round / 2) * (base >= 40 ? 2.5 : 1)
-                for slot in 0..<3 {
+                let kg = base + Double(dense ? (round / 2) % 16 : round / 2) * (base >= 40 ? 2.5 : 1)
+                for slot in 0..<setsEach {
                     let r = max(1, reps - (slot == 2 ? 1 : 0) + (round % 2 == 1 ? 1 : 0))
                     d.sets.append(LoggedSet(id: newId(), exId: it.exId, date: k, slot: slot, weight: kg, reps: r, ts: ts))
                     ts += 150_000
@@ -66,7 +69,7 @@ enum SampleData {
             day.session = Session(start: startMs, end: ts)
             d.days[k] = day
             session += 1
-            offset += 2
+            offset += dense ? 1 : 2
         }
         return d
     }

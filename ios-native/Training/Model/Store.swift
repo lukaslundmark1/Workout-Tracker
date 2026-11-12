@@ -2,12 +2,16 @@ import Foundation
 import Observation
 
 /// Index of logged sets (the web app's `ix()`): by exercise+day, by exercise (oldest first), by day,
-/// and each exercise's dates. Rebuilt whenever the sets change.
-struct SetIndex {
+/// and each exercise's dates. Rebuilt whenever the sets change, except for ticking, unticking and editing one set,
+/// which update it in place (`insert` / `remove` / `update` give exactly what a rebuild would: PerformanceTests).
+struct SetIndex: Equatable {
     var byExDate: [String: [LoggedSet]] = [:]
     var byEx: [String: [LoggedSet]] = [:]
     var byDate: [String: [LoggedSet]] = [:]
     var exDates: [String: [String]] = [:]
+
+    private static let bySlot: (LoggedSet, LoggedSet) -> Bool = { a, b in a.slot != b.slot ? a.slot < b.slot : a.ts < b.ts }
+    private static let byDateSlot: (LoggedSet, LoggedSet) -> Bool = { p, q in p.date != q.date ? p.date < q.date : bySlot(p, q) }
 
     init(_ sets: [LoggedSet]) {
         for s in sets {
@@ -15,15 +19,50 @@ struct SetIndex {
             byEx[s.exId, default: []].append(s)
             byDate[s.date, default: []].append(s)
         }
-        let bySlot: (LoggedSet, LoggedSet) -> Bool = { a, b in a.slot != b.slot ? a.slot < b.slot : a.ts < b.ts }
-        for k in byExDate.keys { byExDate[k]!.sort(by: bySlot) }
+        for k in byExDate.keys { byExDate[k]!.sort(by: SetIndex.bySlot) }
         for (id, a) in byEx {
-            let sorted = a.sorted { p, q in p.date != q.date ? p.date < q.date : bySlot(p, q) }
+            let sorted = a.sorted(by: SetIndex.byDateSlot)
             byEx[id] = sorted
             var ds: [String] = []
             for s in sorted where ds.last != s.date { ds.append(s.date) }
             exDates[id] = ds
         }
+    }
+
+    /// A set appended to the end of the sets (a tick)
+    mutating func insert(_ s: LoggedSet) {
+        SetIndex.insertSorted(&byExDate[s.exId + "|" + s.date, default: []], s, SetIndex.bySlot)
+        SetIndex.insertSorted(&byEx[s.exId, default: []], s, SetIndex.byDateSlot)
+        byDate[s.date, default: []].append(s)
+        var ds = exDates[s.exId] ?? []
+        if !ds.contains(s.date) {
+            let at = ds.lastIndex { $0 < s.date }.map { $0 + 1 } ?? 0
+            ds.insert(s.date, at: at)
+        }
+        exDates[s.exId] = ds
+    }
+    /// A set taken out (an untick)
+    mutating func remove(_ s: LoggedSet) {
+        let k = s.exId + "|" + s.date
+        byExDate[k]?.removeAll { $0.id == s.id }
+        if byExDate[k]?.isEmpty == true { byExDate[k] = nil }
+        byEx[s.exId]?.removeAll { $0.id == s.id }
+        if byEx[s.exId]?.isEmpty == true { byEx[s.exId] = nil }
+        byDate[s.date]?.removeAll { $0.id == s.id }
+        if byDate[s.date]?.isEmpty == true { byDate[s.date] = nil }
+        if byExDate[k] == nil { exDates[s.exId]?.removeAll { $0 == s.date } }
+        if exDates[s.exId]?.isEmpty == true { exDates[s.exId] = nil }
+    }
+    /// A set's weight or reps changed (same id, exercise, day and place)
+    mutating func update(_ s: LoggedSet) {
+        func put(_ a: inout [LoggedSet]?) { if let i = a?.firstIndex(where: { $0.id == s.id }) { a![i] = s } }
+        put(&byExDate[s.exId + "|" + s.date]); put(&byEx[s.exId]); put(&byDate[s.date])
+    }
+    /// Like `sort` would place it: after every element that doesn't sort after it (new sets go last among equals)
+    private static func insertSorted(_ a: inout [LoggedSet], _ s: LoggedSet, _ less: (LoggedSet, LoggedSet) -> Bool) {
+        var i = a.count
+        while i > 0 && less(s, a[i - 1]) { i -= 1 }
+        a.insert(s, at: i)
     }
 }
 
@@ -73,17 +112,44 @@ struct LogModel {
 final class Store {
     var data: AppData {
         didSet {
-            if data.sets != oldValue.sets { idx = nil }
+            // Any change to the sets makes a new array (the old value is kept here), so comparing the arrays' storage
+            // tells whether they changed without comparing thousands of sets. A tick/untick/edit hands over the index
+            // already updated for the new array (`nextIdx`); anything else rebuilds it when it's next needed.
+            let sid = SetsID(data.sets)
+            if sid != SetsID(oldValue.sets) { idx = nextIdx?.id == sid ? nextIdx!.index : nil; prevBestMemo = [:] }
+            nextIdx = nil
             // Typed-but-unsaved numbers were in the old unit (here or on another device)
             if data.settings.units != oldValue.settings.units { drafts = [:]; edits = [:]; pad = nil }
-            schedCache = nil; scheduleSave(); onChange?()
+            schedCache = nil; dayMemo = [:]; scheduleSave(); onChange?()
+            schedulePurge()
         }
+    }
+    /// Planned days that no longer match the plan are dropped right after a change (once per burst of changes;
+    /// it used to run from Today's view, comparing all the data on every redraw)
+    @ObservationIgnored private var purgeQueued = false
+    private func schedulePurge() {
+        guard persist, !purgeQueued else { return }
+        purgeQueued = true
+        DispatchQueue.main.async { [weak self] in self?.purgeQueued = false; self?.purgeStalePlanDays() }
+    }
+    /// Which array of sets (its storage), to tell cheaply whether the sets changed
+    private struct SetsID: Equatable {
+        let base: UnsafeRawPointer?, count: Int
+        init(_ a: [LoggedSet]) { base = a.withUnsafeBufferPointer { UnsafeRawPointer($0.baseAddress) }; count = a.count }
+    }
+    @ObservationIgnored private var nextIdx: (id: SetsID, index: SetIndex)?
+    /// Replace the sets with `new`, updating the index in place (instead of rebuilding it from every set)
+    private func commitSets(_ d: AppData, _ edit: (inout SetIndex) -> Void) {
+        var ix = index
+        edit(&ix)
+        nextIdx = (SetsID(d.sets), ix)
+        data = d
     }
     /// Called after every change (cloud sync schedules a push)
     @ObservationIgnored var onChange: (() -> Void)?
 
     // Screen state (not saved, like the web app's `state`)
-    var today: String = Day0.today { didSet { schedCache = nil } }
+    var today: String = Day0.today { didSet { schedCache = nil; dayMemo = [:] } }
     var selected: String = Day0.today
     var drafts: [String: [Int: Draft]] = [:]      // "exId|day" → row → typed values (unticked rows)
     @ObservationIgnored var keptVideos: [String: [String]] = [:]   // "exId|day|row" → videos of an unticked set (back on re-tick)
@@ -112,6 +178,11 @@ final class Store {
 
     @ObservationIgnored private var idx: SetIndex?
     @ObservationIgnored var schedCache: Schedule?
+    /// Days as shown (`dayOf`), worked out once per change of the data or the date: views ask for the same few days
+    /// dozens of times per redraw (each row, ring and label), and working one out walks the plan and sorts its items.
+    @ObservationIgnored private var dayMemo: [String: Day] = [:]
+    /// Best estimated 1RM before a day, per exercise (`prevBest`: a walk through every earlier set), until the sets change
+    @ObservationIgnored private var prevBestMemo: [String: Double?] = [:]
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var toastTask: Task<Void, Never>?
 
@@ -121,7 +192,7 @@ final class Store {
     init(data: AppData? = nil, persist: Bool = true) {
         self.persist = persist
         let disk = data == nil ? Store.loadFromDisk() : nil
-        self.data = data ?? disk ?? SampleData.make()
+        self.data = data ?? disk ?? (Perf.fixture ? SampleData.make(weeks: Perf.dataWeeks, dense: true) : SampleData.make())
         if persist && data == nil && disk == nil { UserDefaults.standard.set(true, forKey: Store.sampleKey) }
         // Installed before accounts existed: the sample training is recognised by its plan
         if persist && data == nil && UserDefaults.standard.object(forKey: Store.sampleKey) == nil {
@@ -138,7 +209,7 @@ final class Store {
     nonisolated static var fileURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("training.json")
+        return dir.appendingPathComponent(Perf.fixture ? "training-perf.json" : "training.json")
     }
     static func loadFromDisk() -> AppData? {
         guard let d = try? Data(contentsOf: fileURL) else { return nil }
@@ -147,18 +218,21 @@ final class Store {
     private func scheduleSave() {
         guard persist else { return }
         saveTask?.cancel()
-        let snapshot = data
-        saveTask = Task.detached(priority: .utility) {
+        saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
-            if Task.isCancelled { return }
-            if let d = try? JSONEncoder().encode(snapshot) { try? d.write(to: Store.fileURL, options: .atomic) }
+            guard let self, !Task.isCancelled else { return }
+            let snapshot = self.data
+            self.writer.write(Store.fileURL, wait: false) { Perf.measure("save (background)") { try? JSONEncoder().encode(snapshot) } }
         }
     }
+    /// Saves right away (and waits): the app is being put away, an import, an account change
     func saveNow() {
         guard persist else { return }
         saveTask?.cancel()
-        if let d = try? JSONEncoder().encode(data) { try? d.write(to: Store.fileURL, options: .atomic) }
+        let snapshot = data
+        writer.write(Store.fileURL, wait: true) { try? JSONEncoder().encode(snapshot) }
     }
+    @ObservationIgnored private let writer = FileWriter()
     /// Replace everything with a backup (already cleaned by `Clean.backup`), like the web app's Import.
     func importBackup(_ d: AppData) {
         pad = nil; drafts = [:]; edits = [:]
@@ -250,7 +324,13 @@ final class Store {
     // MARK: Lookups
 
     var units: Units { Units(imperial: data.settings.units == "imperial") }
-    var index: SetIndex { if let i = idx { return i }; let i = SetIndex(data.sets); idx = i; return i }
+    var index: SetIndex {
+        // (a cached index doesn't read `data`: tell observation the caller depends on it, as if it had)
+        if let i = idx { access(keyPath: \.data); return i }
+        let i = Perf.measure("SetIndex build") { SetIndex(data.sets) }
+        idx = i
+        return i
+    }
     func setsOf(_ exId: String, _ k: String) -> [LoggedSet] { index.byExDate[exId + "|" + k] ?? [] }
     func setsOn(_ k: String) -> [LoggedSet] { index.byDate[k] ?? [] }
     func hasSets(_ k: String) -> Bool { index.byDate[k] != nil }
@@ -266,7 +346,12 @@ final class Store {
     func woById(_ id: String) -> Workout? { data.workouts.first { $0.id == id } }
 
     /// A day as shown: its stored copy, or what the plan has for it, or nothing
-    func dayOf(_ k: String) -> Day { normalized(data.days[k] ?? virtualDay(k) ?? Day()) }
+    func dayOf(_ k: String) -> Day {
+        if let d = dayMemo[k] { access(keyPath: \.data); return d }
+        let d = normalized(data.days[k] ?? virtualDay(k) ?? Day())
+        dayMemo[k] = d
+        return d
+    }
     /// Makes a day real (stored), with its exercises in groups. A planned day that hasn't been touched yet is filled in from the plan.
     func ensureDay(_ k: String) {
         let d = normalized(data.days[k] ?? virtualDay(k) ?? Day())
@@ -276,8 +361,11 @@ final class Store {
     // MARK: Personal records (a day's best set beats every earlier day; the first session doesn't count)
 
     func prevBest(_ exId: String, _ k: String) -> Double? {
+        let key = exId + "|" + k
+        if let m = prevBestMemo[key] { access(keyPath: \.data); return m }
         var b: Double?
         for s in exSets(exId) { if s.date >= k { break }; b = max(b ?? 0, e1rm(s)) }
+        prevBestMemo[key] = .some(b)
         return b
     }
     func prFor(_ exId: String, _ k: String) -> (set: LoggedSet, prev: Double, now: Double)? {
@@ -341,7 +429,8 @@ final class Store {
 
     // MARK: Ticking sets
 
-    func toggle(_ k: String, _ idx: Int, _ i: Int) {
+    func toggle(_ k: String, _ idx: Int, _ i: Int) { Perf.measure("toggle") { toggleImpl(k, idx, i) } }
+    private func toggleImpl(_ k: String, _ idx: Int, _ i: Int) {
         guard let m = logModel(k, idx) else { return }
         let done = m.bySlot[i]
         if var p = pad, p.day == k, p.exId == m.ex.id, p.g == m.g {
@@ -361,7 +450,9 @@ final class Store {
             Haptics.select()
             drafts[m.dkey, default: [:]][i] = Draft(w: units.w(done.weight), r: String(done.reps))
             if let v = done.v { keptVideos[m.dkey + "|\(i)"] = v }      // untick + tick again keeps its videos
-            data.sets = data.sets.filter { $0.id != done.id }
+            var d = data
+            d.sets = d.sets.filter { $0.id != done.id }
+            commitSets(d) { $0.remove(done) }
             justUnticked = m.dkey + "|\(i)"
             return
         }
@@ -390,7 +481,7 @@ final class Store {
         if let it = d.days[k]!.items.firstIndex(where: { $0.exId == m.ex.id && $0.w == m.g }), i + 1 > (d.days[k]!.items[it].sets ?? 0) {
             d.days[k]!.items[it].sets = i + 1
         }
-        data = d
+        commitSets(d) { $0.insert(newSet) }
         justTicked = newSet.id
         drafts[m.dkey]?[i] = nil
         let prNow = prFor(m.ex.id, k)
@@ -463,8 +554,12 @@ final class Store {
         guard let (m, i) = padModel(), let s = m.bySlot[i], let e = edits[m.dkey]?[i] else { return }
         edits[m.dkey]?[i] = nil
         guard let w = parseW(e.w), let r = parseR(e.r), let at = data.sets.firstIndex(where: { $0.id == s.id }) else { return }
-        data.sets[at].weight = units.fromU(w)
-        data.sets[at].reps = r
+        var d = data
+        d.sets[at].weight = units.fromU(w)
+        d.sets[at].reps = r
+        guard d.sets[at] != data.sets[at] else { return }
+        let edited = d.sets[at]
+        commitSets(d) { $0.update(edited) }
     }
     private func padSet(_ v: String) {
         guard let p = pad, let (m, i) = padModel() else { return }
@@ -563,5 +658,31 @@ final class Store {
             let parts = key.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             return parts[0] >= tk || (parts.count == 2 && isRunning(parts[0], parts[1]))
         }
+    }
+}
+
+/// Writes files on one background queue, in the order they were asked for, so encoding thousands of sets never holds up
+/// the screen; a write that a newer one (or a removal) has overtaken is skipped, so an older copy can never land on top of
+/// a newer one (2026-11-12: the background save could finish after a later "save now" and write older data over it).
+nonisolated final class FileWriter: @unchecked Sendable {
+    private let q = DispatchQueue(label: "io.github.lukaslundmark1.training.files", qos: .utility)
+    private let lock = NSLock()
+    private var issued = 0
+    private func next() -> Int { lock.lock(); defer { lock.unlock() }; issued += 1; return issued }
+    private func isLatest(_ g: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return g == issued }
+
+    /// `make` runs on the queue. `wait`: returns once it's written (e.g. when the app is being put away).
+    func write(_ url: URL, wait: Bool, _ make: @escaping @Sendable () -> Data?) {
+        let g = next()
+        let job: @Sendable () -> Void = { [self] in
+            guard isLatest(g), let d = make() else { return }
+            try? d.write(to: url, options: .atomic)
+        }
+        if wait { q.sync(execute: job) } else { q.async(execute: job) }
+    }
+    /// Deletes a file, after anything already queued (which is then skipped)
+    func remove(_ url: URL) {
+        _ = next()
+        q.sync { try? FileManager.default.removeItem(at: url) }
     }
 }

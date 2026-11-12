@@ -9,6 +9,7 @@ struct SetRow: View {
     @State private var playing: VideoRoute?
 
     var body: some View {
+        let _ = Perf.body("SetRow")
         let done = m.bySlot[i]
         let v = store.rowValues(m, i)
         let u = store.units
@@ -86,6 +87,7 @@ struct TickButton: View {
     @State private var bump = 0
 
     var body: some View {
+        let _ = Perf.body("TickButton")
         Button(action: action) {
             ZStack {
                 Circle().strokeBorder(done ? Color.green : Color.label3, lineWidth: 2)

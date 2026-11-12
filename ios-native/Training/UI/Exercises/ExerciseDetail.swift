@@ -15,6 +15,7 @@ struct ExerciseDetail: View {
     private var stat: StatKind { StatKind(rawValue: statRaw) ?? .e1rm }
 
     var body: some View {
+        let _ = Perf.body("ExerciseDetail")
         NavigationStack {
             if let ex = store.exById(exId) {
                 ScrollView {
@@ -90,6 +91,7 @@ struct ProgressCard: View {
     private var range: ChartRange { ChartRange(rawValue: rangeRaw) ?? .all }
 
     var body: some View {
+        let _ = Perf.body("ProgressCard")
         let x = ix ?? store.index
         let all = x.series(exId, stat, store.units), pts = x.series(exId, stat, store.units, range, today: store.today), unit = store.statUnit(stat)
         VStack(alignment: .leading, spacing: 2) {
@@ -133,7 +135,6 @@ struct ProgressChart: View {
     let stat: StatKind
     let unit: String
     @State private var selDate: Date?
-    @State private var reveal: CGFloat = 0
     @State private var lastSel: String?
 
     private var ticks: [Double] {
@@ -147,12 +148,14 @@ struct ProgressChart: View {
     }
 
     var body: some View {
+        let _ = Perf.body("ProgressChart")
         let t = ticks, y0 = t.first ?? 0, y1 = t.last ?? 1
         let fill = LinearGradient(stops: [.init(color: Color.tint.opacity(0.26), location: 0), .init(color: Color.tint.opacity(0.05), location: 0.65), .init(color: Color.tint.opacity(0), location: 1)],
                                   startPoint: .top, endPoint: .bottom)
+        let drawn = thinned(pts, to: 100)     // (reading a point by dragging still uses every session: `selected`)     // (reading a point by dragging still uses every session: `selected`)
         Chart {
-            ForEach(pts) { p in
-                if pts.count > 1 {
+            ForEach(drawn) { p in
+                if drawn.count > 1 {
                     AreaMark(x: .value("Day", p.date), yStart: .value("Base", y0), yEnd: .value(stat.label, p.v))
                         .interpolationMethod(.monotone).foregroundStyle(fill)
                 }
@@ -202,9 +205,21 @@ struct ProgressChart: View {
         .onChange(of: selected?.id) { _, id in if id != nil && lastSel != nil && id != lastSel { Haptics.select() }; lastSel = id }   // a tick from point to point
         .frame(height: 210)
         .padding(.top, 26)   // room for the reading above the chart
-        .mask(alignment: .leading) { GeometryReader { g in Rectangle().frame(width: g.size.width * reveal) } }
-        .onAppear { if Motion.reduced { reveal = 1 } else { withAnimation(.easeOut(duration: 0.9)) { reveal = 1 } } }   // draws in once
+        .overlay { DrawInCover() }   // draws in once, left to right
         .accessibilityLabel("\(stat.label) over time")
+    }
+}
+
+/// A chart drawing itself in: a card-coloured cover over it shrinks away to the right. Its own view, so the animation
+/// doesn't touch the chart: as a mask animated from the chart's own state, Charts redrew (and animated) every mark on every
+/// frame for the whole 0.9 s, on top of the sheet sliding up (2026-11-12).
+private struct DrawInCover: View {
+    @State private var reveal: CGFloat = 0
+    var body: some View {
+        Color.card.scaleEffect(x: 1 - reveal, y: 1, anchor: .trailing)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onAppear { if Motion.reduced { reveal = 1 } else { withAnimation(.easeOut(duration: 0.9)) { reveal = 1 } } }
     }
 }
 
@@ -229,6 +244,7 @@ struct HistoryList: View {
     @State private var openLog: LogRoute?
 
     var body: some View {
+        let _ = Perf.body("HistoryList")
         let x = ix ?? store.index
         let dates = Array((x.exDates[exId] ?? []).reversed()), prs = x.prSets(exId)   // PRs once per list, not per card
         Text("History").font(.system(size: 20, weight: .bold)).padding(.horizontal, 4).padding(.top, 26).padding(.bottom, 8)

@@ -186,6 +186,36 @@ nonisolated enum ChartRange: String, CaseIterable, Identifiable {
 }
 nonisolated struct StatPoint: Identifiable, Equatable { var k: String; var date: Date; var v: Double; var note: String; var id: String { k } }
 
+/// At most `n` points that draw the same line (Largest-Triangle-Three-Buckets), always keeping the first, the last, the
+/// highest and the lowest. A chart is ~330 points wide: past ~100 sessions the extra points were invisible but made the
+/// chart several times slower to draw and to animate between ranges (2026-11-12). Fewer points than `n`: unchanged.
+nonisolated func thinned(_ p: [StatPoint], to n: Int) -> [StatPoint] {
+    guard n >= 3, p.count > n else { return p }
+    let x = p.map { $0.date.timeIntervalSince1970 }
+    var keep: [Int] = [0]
+    let every = Double(p.count - 2) / Double(n - 2)
+    var a = 0
+    for b in 0..<(n - 2) {
+        // the bucket after this one, averaged (the third corner of the triangle)
+        let ns = Int(Double(b + 1) * every) + 1, ne = min(Int(Double(b + 2) * every) + 1, p.count)
+        var ax = 0.0, ay = 0.0
+        for j in ns..<max(ns + 1, ne) where j < p.count { ax += x[j]; ay += p[j].v }
+        let cnt = Double(max(1, min(ne, p.count) - ns)); ax /= cnt; ay /= cnt
+        // in this bucket, the point making the largest triangle with the last kept one and that average
+        let s = Int(Double(b) * every) + 1, e = min(Int(Double(b + 1) * every) + 1, p.count - 1)
+        var best = s, area = -1.0
+        for j in s..<max(s + 1, e) where j < p.count - 1 {
+            let t = abs((x[a] - ax) * (p[j].v - p[a].v) - (x[a] - x[j]) * (ay - p[a].v))
+            if t > area { area = t; best = j }
+        }
+        keep.append(best); a = best
+    }
+    keep.append(p.count - 1)
+    if let hi = p.indices.max(by: { p[$0].v < p[$1].v }) { keep.append(hi) }
+    if let lo = p.indices.min(by: { p[$0].v < p[$1].v }) { keep.append(lo) }
+    return Array(Set(keep)).sorted().map { p[$0] }
+}
+
 extension Store {
     func mineFor(_ x: LibEntry) -> Exercise? {
         let k = Library.norm(x.name)

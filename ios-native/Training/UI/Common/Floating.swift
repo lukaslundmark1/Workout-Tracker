@@ -4,6 +4,7 @@ import SwiftUI
 struct RestRoom: ViewModifier {
     @Environment(Store.self) private var store
     func body(content: Content) -> some View {
+        let _ = Perf.body("RestRoom")
         let shown = store.rest.map { $0.date == store.today } ?? false
         content
             .safeAreaPadding(.bottom, shown ? 62 : 0)
@@ -17,10 +18,12 @@ struct RestPill: View {
     let rest: RestState
 
     var body: some View {
+        let _ = Perf.body("RestPill")
         HStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("REST").font(.system(size: 13, weight: .semibold)).tracking(0.5).foregroundStyle(Color.label2)
-                TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                // ticks exactly when the shown second changes (it ticked twice a second to stay close)
+                TimelineView(.periodic(from: Date(timeIntervalSince1970: rest.start / 1000), by: 1)) { _ in
                     Text(Fmt.dur(nowMs() - rest.start)).font(.rounded(24, .bold)).monospacedDigit()
                 }
                 if let ex = store.exById(rest.exId) {
@@ -48,6 +51,7 @@ struct RestPill: View {
 struct ToastView: View {
     @Environment(Store.self) private var store
     var body: some View {
+        let _ = Perf.body("ToastView")
         ZStack {
             if let t = store.toast {
                 let (icon, color): (String, Color) = t.kind == .pr ? ("trophy.fill", .orange) : t.kind == .done ? ("checkmark", .green) : t.kind == .gift ? ("gift.fill", .tint) : ("arrow.right", .tint)

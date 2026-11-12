@@ -5,14 +5,17 @@ import SwiftUI
 struct WeekStrip: View {
     @Environment(Store.self) private var store
     @Binding var pos: Int?
+    @Binding var range: ClosedRange<Int>           // the weeks that exist (a window around the one shown: TodayView)
     let weekKey: (Int) -> String
     let select: (String) -> Void
     @Namespace private var capsule
 
     var body: some View {
+        let _ = Perf.body("WeekStrip")
+        ScrollViewReader { proxy in
         ScrollView(.horizontal) {
             LazyHStack(spacing: 0) {
-                ForEach(-120...60, id: \.self) { off in
+                ForEach(range, id: \.self) { off in
                     week(weekKey(off))
                         .padding(.horizontal, 12)
                         .containerRelativeFrame(.horizontal)
@@ -25,6 +28,14 @@ struct WeekStrip: View {
         .scrollIndicators(.hidden)
         .scrollClipDisabled()   // lets today's red glow show
         .frame(height: 74)
+        // stopped near the window's edge: a new window, with the same week put back in place in the same pass
+        .onScrollPhaseChange { _, phase in
+            guard phase == .idle, let p = pos,
+                  let w = TodayView.recentered(range, at: p, edge: TodayView.weekEdge, half: TodayView.weekHalf) else { return }
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) { range = w; proxy.scrollTo(p, anchor: .leading) }
+        }
+        }
     }
 
     private func week(_ ws: String) -> some View {

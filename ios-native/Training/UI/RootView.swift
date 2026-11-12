@@ -9,6 +9,7 @@ struct RootView: View {
     @Environment(Cloud.self) private var cloud
 
     var body: some View {
+        let _ = Perf.body("RootView")
         @Bindable var store = store
         TabView(selection: $store.tab) {
             Tab("Friends", systemImage: "person.2.fill", value: AppTab.friends) {
@@ -51,6 +52,7 @@ struct RootView: View {
 private struct BottomLayer: View {
     @Environment(Store.self) private var store
     var body: some View {
+        let _ = Perf.body("BottomLayer")
         ZStack(alignment: .bottom) {
             // (the exercise screen shows its own, over the tab bar's spot)
             if let r = store.rest, r.date == store.today, !store.logOpen {

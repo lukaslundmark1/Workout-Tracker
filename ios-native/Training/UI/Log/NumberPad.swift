@@ -16,6 +16,7 @@ struct NumberPad: View {
     private var live: Shown? { store.pad.map { Shown(p: $0, value: store.padValue, rows: store.padRows) } }
 
     var body: some View {
+        let _ = Perf.body("NumberPad")
         content(live ?? lastShown)
             .onAppear { lastShown = live }
             .onChange(of: live) { _, v in if let v { lastShown = v } }

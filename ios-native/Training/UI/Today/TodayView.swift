@@ -14,6 +14,14 @@ struct TodayView: View {
     @State private var base = Day0.today          // day offsets count from here (fixed while the view lives)
     @State private var dayPos: Int? = 0
     @State private var weekPos: Int? = 0
+    // Only a window of pages exists around the one on screen (2026-11-12, performance): the scroll views measure every
+    // page they hold on each change, and 1,201 days + 181 weeks took ~4 ms per change. The window moves when the
+    // scrolling has stopped near its edge (with the page on screen put back in the same pass, so nothing moves), and
+    // jumps further than an animated scroll goes (the calendar, Today from far away) get a new window around the
+    // target and land at once, as they already did. Animated moves (≤ 14 days, a week or two) stay inside the window.
+    @State private var dayWin = -35...35
+    @State private var weekWin = -10...10
+    static let dayEdge = 15, dayHalf = 35, weekEdge = 4, weekHalf = 10
     @State private var showAdd = false
     @State private var finishFor: GroupKey?
     @State private var moveFor: MoveRoute?
@@ -27,9 +35,10 @@ struct TodayView: View {
     private var shownWeek: String { weekKey(weekPos ?? 0) }
 
     var body: some View {
+        let _ = Perf.body("TodayView")
         VStack(spacing: 0) {
                 header
-                WeekStrip(pos: $weekPos, weekKey: weekKey, select: { k in
+                WeekStrip(pos: $weekPos, range: $weekWin, weekKey: weekKey, select: { k in
                     guard k != store.selected else { return }
                     Haptics.select()
                     Motion.run { store.selected = k }
@@ -54,7 +63,7 @@ struct TodayView: View {
                 Motion.run { store.selected = k }
             }
             let w = weekOff(of: k)
-            if weekPos != w { Motion.run { weekPos = w } }
+            if weekPos != w { moveWeek(to: w) }
         }
         // a far jump (the calendar, Today from far away) lands at once instead of scrolling past every day in between
         .onChange(of: store.selected) { old, k in sync(to: k, animated: abs(Day0.between(old, k)) <= 14) }
@@ -78,16 +87,29 @@ struct TodayView: View {
                 Motion.run { store.selected = k }
             }
         }
-        // Stored copies of planned days that no longer match the plan are dropped (like every redraw in the web app)
-        .onChange(of: store.data) { store.purgeStalePlanDays() }
+        // Stored copies of planned days that no longer match the plan are dropped (like every redraw in the web app;
+        // after each change the store does it itself: Store.data)
         .onAppear { store.purgeStalePlanDays() }
     }
 
     private func sync(to k: String, animated: Bool) {
         let p = Day0.between(base, k)
-        if dayPos != p { if animated { Motion.run(Motion.screen) { dayPos = p } } else { dayPos = p } }
+        if dayPos != p {
+            if animated && dayWin.contains(p) { Motion.run(Motion.screen) { dayPos = p } }
+            else { dayWin = (p - Self.dayHalf)...(p + Self.dayHalf); dayPos = p }   // a new window around it: lands at once
+        }
         let w = weekOff(of: k)
-        if weekPos != w { if animated { Motion.run { weekPos = w } } else { weekPos = w } }
+        if weekPos != w { moveWeek(to: w, animated: animated) }
+    }
+    /// Shows week `w`: slides there when it's in the window, otherwise lands at once in a new window around it
+    private func moveWeek(to w: Int, animated: Bool = true) {
+        if animated && weekWin.contains(w) { Motion.run { weekPos = w } }
+        else { weekWin = (w - Self.weekHalf)...(w + Self.weekHalf); weekPos = w }
+    }
+
+    /// A new window around `p` when it has come within `edge` pages of the end of `w` (nil: keep `w`)
+    static func recentered(_ w: ClosedRange<Int>, at p: Int, edge: Int, half: Int) -> ClosedRange<Int>? {
+        p - w.lowerBound >= edge && w.upperBound - p >= edge ? nil : (p - half)...(p + half)
     }
 
     // Month name, Today (only when looking at another week), previous/next week
@@ -118,18 +140,18 @@ struct TodayView: View {
             if otherWeek {
                 Button("Today") {
                     Haptics.select()
-                    Motion.run { weekPos = weekOff(of: store.today) }
+                    moveWeek(to: weekOff(of: store.today))
                     if store.selected != store.today { Motion.run { store.selected = store.today } }
                 }
                 .buttonStyle(.glass)
                 .transition(.scale(0.8).combined(with: .opacity))
             }
             HStack(spacing: 0) {
-                Button { Haptics.select(); Motion.run { weekPos = (weekPos ?? 0) - 1 } } label: {
+                Button { Haptics.select(); moveWeek(to: (weekPos ?? 0) - 1) } label: {
                     Image(systemName: "chevron.left").frame(width: 46, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("Previous week")
-                Button { Haptics.select(); Motion.run { weekPos = (weekPos ?? 0) + 1 } } label: {
+                Button { Haptics.select(); moveWeek(to: (weekPos ?? 0) + 1) } label: {
                     Image(systemName: "chevron.right").frame(width: 46, height: 44).contentShape(Rectangle())
                 }
                 .accessibilityLabel("Next week")
@@ -146,20 +168,28 @@ struct TodayView: View {
 
     // Days side by side; swipe to go to the previous/next day (quick flicks in a row go further)
     private var dayPager: some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: 0) {
-                ForEach(-800...400, id: \.self) { off in
-                    DayPage(k: dayKey(off), onOpen: { openLog = $0 }, onAdd: { showAdd = true }, onFinish: { finishFor = $0 },
-                            onMove: { moveFor = $0 })
-                        .containerRelativeFrame(.horizontal)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(dayWin, id: \.self) { off in
+                        DayPage(k: dayKey(off), onOpen: { openLog = $0 }, onAdd: { showAdd = true }, onFinish: { finishFor = $0 },
+                                onMove: { moveFor = $0 })
+                            .containerRelativeFrame(.horizontal)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .scrollTargetLayout()
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $dayPos)
+            .scrollIndicators(.hidden)
+            .scrollDisabled(store.reordering)
+            // stopped near the window's edge: a new window, and the same page back in place in the same pass
+            .onScrollPhaseChange { _, phase in
+                guard phase == .idle, let p = dayPos, let w = Self.recentered(dayWin, at: p, edge: Self.dayEdge, half: Self.dayHalf) else { return }
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { dayWin = w; proxy.scrollTo(p, anchor: .leading) }
+            }
         }
-        .scrollTargetBehavior(.paging)
-        .scrollPosition(id: $dayPos)
-        .scrollIndicators(.hidden)
-        .scrollDisabled(store.reordering)
     }
 }
 
@@ -175,6 +205,7 @@ struct DayPage: View {
     var onMove: (MoveRoute) -> Void
 
     var body: some View {
+        let _ = Perf.body("DayPage")
         let day = store.dayOf(k)
         let logged = store.hasSets(k)
         ScrollView {

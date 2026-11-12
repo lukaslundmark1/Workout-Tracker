@@ -53,7 +53,7 @@ extension Store {
     /// The schedule (cached until the data or the date changes).
     var schedule: Schedule {
         if let s = schedCache, s.tk == today { return s }
-        let s = computeSchedule(days: data.days)
+        let s = Perf.measure("schedule walk") { computeSchedule(days: data.days) }
         schedCache = s
         return s
     }
@@ -91,10 +91,9 @@ extension Store {
 
         let horizon = Day0.add(tk, 400)
         var k = ap.begin
-        var date = Day0.date(ap.begin)
         while true {
             if k > horizon || (end != nil && k >= end!) { break }
-            defer { date = Day0.cal.date(byAdding: .day, value: 1, to: date)!; k = Day0.key(date) }
+            defer { k = Day0.add(k, 1) }
             let st = days[k], tr = hasSets(k)
             if let st, st.rest == true, st.items.isEmpty, !tr {
                 addAbsorb(st.absorb)
@@ -130,7 +129,8 @@ extension Store {
     }
     /// Stored copies of planned days that no longer match the schedule (the workout moved) are dropped,
     /// unless you've trained, started a timer, or pinned them.
-    func purgeStalePlanDays() {
+    func purgeStalePlanDays() { Perf.measure("purgeStalePlanDays") { purgeStale() } }
+    private func purgeStale() {
         let sc = schedule
         guard sc.plan != nil else { return }
         let stale = data.days.filter { k, d in

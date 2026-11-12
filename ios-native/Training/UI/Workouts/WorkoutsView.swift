@@ -9,6 +9,7 @@ struct WorkoutsView: View {
     @State private var editPlan: PlanDraft?
 
     var body: some View {
+        let _ = Perf.body("WorkoutsView")
         NavigationStack {
             List {
                 Section {

@@ -10,6 +10,7 @@ struct WorkoutGroupView: View {
     var onFinish: () -> Void
 
     var body: some View {
+        let _ = Perf.body("WorkoutGroupView")
         let key = k + "|" + group.id
         let folded = store.collapsed.contains(key)
         let finished = store.isFinished(k, group.id)
@@ -115,6 +116,7 @@ struct DayExerciseList: View {
     @State private var droppedAt = Date.distantPast  // the tap that ends a drag doesn't open the exercise
 
     var body: some View {
+        let _ = Perf.body("DayExerciseList")
         let items = store.dayOf(k).items.filter { $0.w == g }
         let ids = dragging != nil ? drag.order : items.map(\.exId)
         VStack(spacing: 0) {

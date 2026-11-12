@@ -10,17 +10,27 @@ struct MonthGrid<Cell: View>: View {
         let firstDay = store.data.settings.weekStart
         let names = firstDay == 0 ? ["S", "M", "T", "W", "T", "F", "S"] : ["M", "T", "W", "T", "F", "S", "S"]
         let lead = Day0.between(Day0.weekStart(m, firstDay: firstDay), m)
-        let count = Day0.cal.range(of: .day, in: .month, for: Day0.date(m))!.count
-        let cols = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
+        let count = Day0.between(m, MonthGrid.monthStart(m, plus: 1))
+        let rows = (lead + count + 6) / 7
         VStack(alignment: .leading, spacing: 10) {
             Text("\(Fmt.month(m)) \(String(Fmt.year(m)))").font(.system(size: 20, weight: .bold)).padding(.horizontal, 4)
-            LazyVGrid(columns: cols, spacing: 6) {
-                // (each cell needs its own id in one grid: plain 0, 1, 2… repeated made days 1–7 disappear)
-                ForEach(0..<7, id: \.self) { i in
-                    Text(names[i]).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.label2).id("h\(i)")
+            // Plain rows of seven (it was a LazyVGrid: a lazy grid in every month of a lazy list of months made opening
+            // the calendar take ~300 ms with two years of training; a month is only 28–42 cells)
+            VStack(spacing: 6) {
+                HStack(spacing: 0) {
+                    ForEach(0..<7, id: \.self) { i in
+                        Text(names[i]).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.label2).frame(maxWidth: .infinity)
+                    }
                 }
-                ForEach((0..<lead).map { "p\($0)" }, id: \.self) { _ in Color.clear.frame(height: 50) }
-                ForEach((0..<count).map { Day0.add(m, $0) }, id: \.self) { k in cell(k) }
+                ForEach(0..<rows, id: \.self) { r in
+                    HStack(spacing: 0) {
+                        ForEach(0..<7, id: \.self) { c in
+                            let i = r * 7 + c - lead
+                            if i >= 0 && i < count { cell(Day0.add(m, i)) }
+                            else { Color.clear.frame(maxWidth: .infinity).frame(height: 50) }
+                        }
+                    }
+                }
             }
             .padding(.vertical, 12).padding(.horizontal, 6)
             .background(Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -29,7 +39,9 @@ struct MonthGrid<Cell: View>: View {
 
     static func monthStart(_ k: String, plus n: Int = 0) -> String {
         let first = Day0.add(k, 1 - Day0.dayOfMonth(k))
-        return n == 0 ? first : Day0.key(Day0.cal.date(byAdding: .month, value: n, to: Day0.date(first))!)
+        guard n != 0, let p = Day0.parts(first) else { return first }
+        let total = p.y * 12 + (p.m - 1) + n          // months counted from year 0
+        return String(format: "%04d-%02d-01", total / 12, total % 12 + 1)
     }
 }
 

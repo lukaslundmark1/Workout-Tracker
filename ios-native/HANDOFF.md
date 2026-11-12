@@ -1,7 +1,7 @@
-# Handoff: Training β (native SwiftUI app), next up: performance and optimization
+# Handoff: Training β (native SwiftUI app)
 
-Updated 2026-11-12 (late) at the end of a feature session: calendar from the month name, videos linked to sets, History
-days open the exercise screen, video sound on silent, smooth kg ↔ Reps switch. Before that: a polish session, Friends,
+Updated 2026-11-12 (night) after a performance session (below). Before that, a feature session: calendar from the month
+name, videos linked to sets, History days open the exercise screen, video sound on silent, smooth kg ↔ Reps switch; and a polish session, Friends,
 accounts + sync and the day overhaul. **Read in this order:** `../CLAUDE.md` (how Lukas works), this file,
 `../docs/NATIVE-REBUILD.md` (the original plan and the data format), the "Fully native app" entries in
 `../docs/DECISIONS.md` (every choice and why), `README.md` here. The web app (`../app.js`) is the reference: when docs and
@@ -9,7 +9,7 @@ code disagree, the code wins. `../dev/README.md` → performance rules and `../d
 describe how the *web* app was made fast; the same ideas (index, caches, no work during gestures) apply here.
 
 ## Where things stand
-- Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 63 unit tests pass. Lukas has the project
+- Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 69 unit tests pass. Lukas has the project
   open in Xcode with his Team set; he presses ▶ to put it on his iPhone (every native change needs ▶ again).
 - The polish and feature sessions (below), this file, `../docs/DECISIONS.md` and the Xcode-upgraded `project.pbxproj`
   were committed on 2026-11-12 as "native: polish, calendar, videos on sets, History → day" (before perf work, so perf
@@ -87,40 +87,36 @@ Done (steps 0–4 of NATIVE-REBUILD §8, plus extras Lukas asked for):
 - Not done: shared exercise database (browse shared entries, "Share to the database" on your own), embedded YouTube player, Google sign-in (only if asked), `#add-CODE` invite links opening the β app (they open
   the web app; the β app would need associated domains).
 
-## Next session: performance and optimization (Lukas, 2026-11-12)
-Lukas is starting a session focused on performance. Nothing specific was reported as slow yet (he did say v0.26's web
-perf work mattered to him). **Start by asking what feels slow on his phone** (opening, swiping days, ticking sets,
-opening an exercise, History/charts, sync) and how much training he has in the β app; then measure before changing.
-Keep his rules: no visible behaviour change without asking, every movement stays on the `Motion` springs, haptics stay.
+## Performance session (2026-11-12, not committed yet; details and numbers in ../docs/DECISIONS.md → "Fully native app: performance and battery")
+Lukas: nothing felt slow, but "animation performance could be better"; then: optimise everything with lots of fake data.
+Done, all verified in the Simulator (dark + light) and by tests; **not yet felt on his phone**: ask how it feels.
+- **▶ builds Release** (`Training.xcodeproj/xcshareddata/xcschemes/Training.xcscheme`): the Debug build ran Swift and
+  Firebase unoptimised, 2–5x slower. `dev/run-sim.sh` / `run-emu.sh` build Debug explicitly; `CONF=Release dev/run-sim.sh
+  launch <UDID> [args]` builds what ▶ builds.
+- **Store:** O(1) "sets changed?" (`SetsID`), set index updated in place on tick/untick/edit (`commitSets`,
+  `SetIndex.insert/remove/update`), `dayMemo` (dayOf), `prevBestMemo`, integer day maths in `Day0`, memoised `Fmt` dates,
+  `purgeStalePlanDays` once per burst from the store (not `onChange(of: store.data)` in TodayView), saves on a serial
+  background queue (`FileWriter`, also for the sync state). Caches that skip reading `data` call
+  `access(keyPath: \.data)` so views still redraw when it changes: keep that if you add another.
+- **Today pagers are windowed** (`dayWin`/`weekWin`, recentred only when scrolling is idle, with `proxy.scrollTo` in the same
+  no-animation transaction; far jumps get a new window). Don't recentre mid-scroll: the page jumps.
+- **Charts:** `DrawInCover` (its own view: the old mask redrew every mark each frame), `thinned(_:to: 100)` (LTTB).
+- **Battery:** `PulseDot` (Core Animation blink for the running timer), clocks aligned to their start second.
+- Calendar months are plain rows. Left as is (see DECISIONS): calendar opening (~170 ms with 2 years: the lazy month list
+  measures every month above the start), first sheet opens (system), sync push (~4 ms per change with 10k sets).
 
-How to measure (nothing native exists yet; build it first):
-- **A big data set.** The sample training is tiny. Make a debug-only fixture (e.g. a launch argument like
-  `-perfData` → 2 years, ~10,000 sets, a running plan, friends' data optional) so numbers mean something; the web app's
-  `../dev/perf.py` used 2 years / ~10,000 sets with the CPU slowed 4x. Never load it into a signed-in account (it syncs).
-- **Instruments from the command line:** `xcrun xctrace record --template 'SwiftUI' --device <UDID> --launch -- <app>`
-  (or Time Profiler / Hangs / Animation Hitches), then open the `.trace`. Add `os_signpost` intervals around suspects.
-- **Frame by frame** for hitches you can see: `simctl io recordVideo` + `dev/frames.swift` (30 fps); a strip-cropping
-  helper that stacks one band of each frame (e.g. the number pad header) made the kg ↔ Reps bug obvious: the capsule's
-  frame count shows a snap vs a spring. The Simulator runs on the Mac's CPU: confirm wins on Lukas's phone.
-
-Suspects found while reading the code (unmeasured; check each before touching it):
-1. **`Store.data.didSet` does `data.sets != oldValue.sets`**: a full array compare of every set on *every* data change
-   (typing a note, moving a workout, any sync). Then `idx = nil` rebuilds the whole `SetIndex` after each tick.
-   Ideas: compare counts/identity cheaply or mark set changes explicitly; update the index incrementally on tick/untick.
-2. **Every change re-encodes all of `AppData` to JSON** (`scheduleSave`, 300 ms debounce, background) and writes one
-   `training.json`: with 10k sets that's big. The web app splits sets per month (`tt.v1s.YYYY-MM`); something similar
-   (or only re-encoding changed months) would help. Keep the format readable for import/export and old files loadable.
-3. **One `@Observable var data`**: any change invalidates every view that reads `store.data` (all tabs, all day pages).
-   Fine-grained observation (separate stored properties, or per-view derived models) could cut redraws on tick.
-4. **`TodayView` `.onChange(of: store.data)`** compares the whole `AppData` (Equatable, all sets) on each update and
-   then runs `purgeStalePlanDays()`, which rebuilds the plan schedule (`schedCache` is cleared on every data change).
-   `Schedule` has no fingerprint cache like the web app's `schedSigNow`; adding one is likely a big win.
-5. **Today's day pager** is a `LazyHStack` over `-800...400` pages; each `DayPage` reads the store. Check what a swipe
-   redraws (Self._printChanges() in a debug build).
-6. Smaller: `CalendarSheet.months` scans `index.byDate.keys.min()` per body; `VideoThumb` looks up assets on appear
-   (cached after); `HistoryList` is a `LazyVStack` inside a `ScrollView` with a chart above it (check scrolling a long
-   history); sync push uses `HashCache` already (don't redo).
-Measure → change one thing → re-measure → run the 63 tests (+ add tests for any new caching: stale caches are the risk).
+How to measure (the tools exist now):
+- `CONF=Release ./dev/run-sim.sh launch <UDID> -perfData 104 -perfLog 1`, then
+  `xcrun simctl spawn <UDID> log stream --style compact --predicate 'subsystem == "perf"'`: dropped frames per second, slow
+  work (`Perf.measure`), and which views redrew after each burst (`let _ = Perf.body("Name")` in a body). `-perfData` uses
+  `training-perf.json` and turns sync off; never use it on Lukas's phone.
+- Time Profiler: `xcrun xctrace record --template 'Time Profiler' --device <UDID> --attach Training --time-limit 10s
+  --output x.trace`, then `xcrun xctrace export --input x.trace --xpath '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]'`
+  and sum main-thread samples (1 ms each) by frame or binary. The Simulator's frame drops vary ±150 ms run to run (the Mac
+  is shared with Lukas's simulators): compare summed CPU over 3+ repeats, not single hitches.
+- Idle CPU: `ps -o %cpu= -p $(pgrep -f "<UDID>.*Training.app/Training")` (Today idle = 0%, exercise screen idle ≈ 0.2%).
+- Known pre-existing glitch (not fixed): tapping a day in the week strip and tapping the page again before it finishes
+  scrolling can leave the page on the old day with the new day selected.
 
 Other ideas if they come up later (don't push them): decide the β app's future (replace `../native/` for himself and/or
 TestFlight, $99/year); leftovers (shared exercise database, YouTube player, Google sign-in only if asked, invite links
@@ -200,7 +196,8 @@ account untouched); the stale-sync-state case above.
   Run them on a simulator **other** than the one you're looking at (a test run can shut that one down).
   If every run fails with "failed to launch … No such process" (no crash report), the default build folder is stale:
   add `-derivedDataPath <scratch folder>` for a fresh build (2026-11-12).
-  59 tests (thousands of checks): friends (`FriendsTests`: gift import = app.js on a messy gift, codes, links, profiles), per-workout timers (`SessionTests`), day groups and Move (`DayGroupsTests`), sync (`SyncTests`: what's sent, merging, web-shaped documents, hash/friend code = app.js), logic, sanitizers (must equal app.js on a messy file), schedule (replays 1,500 steps recorded from
+  69 tests (thousands of checks): performance (`PerformanceTests`: day maths = Calendar, in-place index and remembered days
+  = a rebuild after 300 random ticks/edits, file writes in order, chart thinning), friends (`FriendsTests`: gift import = app.js on a messy gift, codes, links, profiles), per-workout timers (`SessionTests`), day groups and Move (`DayGroupsTests`), sync (`SyncTests`: what's sent, merging, web-shaped documents, hash/friend code = app.js), logic, sanitizers (must equal app.js on a messy file), schedule (replays 1,500 steps recorded from
   app.js's own plan code; regenerate with `node ios-native/dev/schedule-fixtures.js`), workouts, exercises, sessions, reorder.
   For new ported logic, get expected values from app.js itself (node) rather than by hand: two hand-written expectations
   were wrong this session.
@@ -236,7 +233,8 @@ account untouched); the stale-sync-state case above.
   `Groups.swift` workouts on a day, Move · `Sessions.swift` each workout's timer/Finish ·
   `Plans.swift` plan schedule + moving plan days · `Workouts.swift` save/delete/start/end · `Library.swift` exercise
   database, chart series, PRs, summary · `Sanitize.swift` `Clean.*` · `SampleData.swift` · `SyncCore.swift` + `Cloud.swift`
-  accounts and sync · `Friends.swift` + `FriendsCloud.swift` friends, profiles, gifts · `Videos.swift` videos on sets
+  accounts and sync · `Friends.swift` + `FriendsCloud.swift` friends, profiles, gifts · `Perf.swift` performance tools
+  (`-perfData`, `-perfLog`) · `Videos.swift` videos on sets
   (Photos ids, thumbnails, playback, movie sound).
 - `UI/RootView` tabs + floating rest/toasts · `Today/` (TodayView, WeekStrip, DayExerciseList + WorkoutGroupView, MoveSheet, CalendarSheet = MonthGrid + CalendarDay) ·
   `Log/` (LogView sheet, SetRow, NumberPad, VideoViews = Link video / thumbnails / player) · `Workouts/` · `Exercises/` · `Summary/` · `Friends/` · `Common/` (Finish, Add, Note,

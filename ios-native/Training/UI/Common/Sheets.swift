@@ -295,6 +295,7 @@ struct SettingsView: View {
     enum AccountSheet: String, Identifiable { case signIn, signOut, delete; var id: String { rawValue } }
 
     var body: some View {
+        let _ = Perf.body("SettingsView")
         @Bindable var s = store
         let signedIn = cloud.user != nil
         NavigationStack {

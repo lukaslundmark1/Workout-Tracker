@@ -20,6 +20,7 @@ struct LogView: View {
     private var group: String { let it = items; let p = min(pos ?? 0, it.count - 1); return p >= 0 ? (it[p].w ?? otherGroup) : otherGroup }
 
     var body: some View {
+        let _ = Perf.body("LogView")
         NavigationStack {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
@@ -108,6 +109,7 @@ struct TimerButton: View {
     var onFinish: () -> Void
 
     var body: some View {
+        let _ = Perf.body("TimerButton")
         let s = store.sessionOf(day, g)
         if s == nil && day != store.today {
             // no timer when filling in another day
@@ -126,11 +128,13 @@ struct TimerButton: View {
                         Image(systemName: "pause.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(Color.orange)
                             .transition(.scale.combined(with: .opacity))
                     } else {
-                        Circle().fill(Color.red).frame(width: 8, height: 8)
-                            .phaseAnimator([1.0, 0.35]) { c, o in c.opacity(o) } animation: { _ in .easeInOut(duration: 0.8) }
+                        PulseDot()
+                            .frame(width: 8, height: 8)
                             .transition(.scale.combined(with: .opacity))
                     }
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    // ticks when the shown second changes (counted from the start), not every second from whenever it appeared;
+                    // paused, it doesn't tick at all
+                    TimelineView(.periodic(from: Date(timeIntervalSince1970: (s?.start ?? 0) / 1000), by: paused ? 86_400 : 1)) { _ in
                         Text(Fmt.dur(store.elapsed(day, g))).font(.rounded(15)).monospacedDigit()
                             .foregroundStyle(paused ? Color.label2 : Color.primary)
                     }
@@ -167,6 +171,7 @@ struct LogPage: View {
     @State private var history = false
 
     var body: some View {
+        let _ = Perf.body("LogPage")
         if let m = store.logModel(day, idx) {
             ScrollViewReader { proxy in
                 ScrollView {
@@ -361,4 +366,33 @@ struct Instructions: View {
         .card()
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
+}
+
+/// The running timer's red dot, blinking (1 → 0.35 → 1, 0.8 s each way). The blink is a Core Animation animation, so the
+/// system runs it on its own at a low frame rate: done in SwiftUI (phaseAnimator, or a symbol's pulse) the app redrew
+/// every frame for as long as the exercise screen was open (~2–3% CPU, and the screen never dropped to a low refresh
+/// rate). (2026-11-12, battery.)
+struct PulseDot: UIViewRepresentable {
+    final class Dot: UIView {
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .systemRed
+            isUserInteractionEnabled = false
+        }
+        required init?(coder: NSCoder) { fatalError() }
+        override func layoutSubviews() { super.layoutSubviews(); layer.cornerRadius = bounds.height / 2 }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            layer.removeAnimation(forKey: "blink")
+            guard window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
+            let a = CABasicAnimation(keyPath: "opacity")
+            a.fromValue = 1; a.toValue = 0.35
+            a.duration = 0.8; a.autoreverses = true; a.repeatCount = .infinity
+            a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            a.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 30, preferred: 20)
+            layer.add(a, forKey: "blink")
+        }
+    }
+    func makeUIView(context: Context) -> Dot { Dot() }
+    func updateUIView(_ v: Dot, context: Context) {}
 }
