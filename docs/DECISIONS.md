@@ -228,6 +228,10 @@ Lukas asked to see what the app would be like fully rebuilt for iOS (`docs/NATIV
 - Also decided: keep the red trash icon on Today rows; keep the rest stopwatch as a floating pill for now (the
   strip above the tab bar is an option for later).
 
+- Finish / Duration pop-up: Lukas said it was "the old grey colour" when opened from the stopwatch after finishing, and the
+  layout was "a little too high". Shown two options (short floating pop-up vs a full-height black page), he chose the
+  short pop-up: only as tall as its content, wheels shorter (150 pt) and without the lighter box behind them.
+
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.
 - Push: diff each record's hash against what was last synced, send in batches, debounced 600 ms.

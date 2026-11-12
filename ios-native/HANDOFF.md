@@ -26,6 +26,10 @@ Verified in the Simulator (dark + light, and frame by frame that sheets don't fl
 - A new sheet: pick `.pageColors()` if the web shows it as a page, else leave it (full height) or `.sheetColors()` (partial height).
   Don't use `secondarySystemBackground`/`tertiarySystemBackground` for sheet backgrounds or cards; use `Color.bg`/`Color.card`.
 - Menus (`Menu`, confirmation dialogs) are Apple's own glass and weren't changed.
+- **Finish / Duration pop-up (2026-11-12, Lukas picked it from two mock-ups):** a short pop-up, as tall as its content
+  (measured, `.height(content + 64)`), floating over the screen with `.sheetColors()`. The hour/minute wheels are 150 pt
+  tall and sit straight on the pop-up without a card (like the Clock app's timer). Full height looked grey over the black
+  exercise screen and left a big empty area; the rejected option was a full-height black page.
 
 ## Where things stand
 - Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 69 unit tests pass. Lukas has the project

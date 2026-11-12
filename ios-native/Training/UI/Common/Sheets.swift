@@ -12,6 +12,7 @@ struct FinishSheet: View {
     @State private var h = 0
     @State private var m = 0
     @State private var ready = false
+    @State private var contentH: CGFloat = 0
 
     private struct Calc {
         var editing: Bool, logged: [LoggedSet], unticked: [Store.Unticked], ok: [Store.Unticked]
@@ -64,15 +65,15 @@ struct FinishSheet: View {
                         .padding(.horizontal, 6).padding(.bottom, 4)
                     HStack(spacing: 0) {
                         Picker("Hours", selection: $h) { ForEach(0..<10) { Text("\($0)").tag($0) } }
-                            .pickerStyle(.wheel).frame(width: 90)
+                            .pickerStyle(.wheel).frame(width: 90, height: 150).clipped()
                         Text("h").fontWeight(.semibold)
                         Picker("Minutes", selection: $m) { ForEach(0..<60) { Text(String(format: "%02d", $0)).tag($0) } }
-                            .pickerStyle(.wheel).frame(width: 90)
+                            .pickerStyle(.wheel).frame(width: 90, height: 150).clipped()
                         Text("min").fontWeight(.semibold)
                     }
                     .font(.rounded(20))
                     .frame(maxWidth: .infinity)
-                    .background(Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    // the wheels sit straight on the pop-up (no lighter box), like the Clock app's timer
                     .onChange(of: h) { if ready { Haptics.select() } }
                     .onChange(of: m) { if ready { Haptics.select() } }
 
@@ -83,8 +84,10 @@ struct FinishSheet: View {
                             .multilineTextAlignment(.center).frame(maxWidth: .infinity)
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 30)
+                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentH = $0 }
             }
+            .scrollBounceBehavior(.basedOnSize)
             .background(Color.bg)
             .navigationTitle(c.editing ? "Duration" : "Finish \(store.groups(day).first { $0.id == g }.map { $0.id == otherGroup ? "workout" : $0.name } ?? "workout")")
             .navigationBarTitleDisplayMode(.inline)
@@ -98,6 +101,9 @@ struct FinishSheet: View {
                 }
             }
         }
+        // a short pop-up, just as tall as what's in it (plus the title bar), floating over the screen (Lukas, 2026-11-12)
+        .presentationDetents([contentH > 0 ? .height(min(contentH + 64, 760)) : .medium])
+        .sheetColors()
         .onAppear {
             let c = calc()
             h = min(9, c.mins / 60); m = c.mins % 60
