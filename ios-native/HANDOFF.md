@@ -30,6 +30,13 @@ Verified in the Simulator (dark + light, and frame by frame that sheets don't fl
   (measured, `.height(content + 64)`), floating over the screen with `.sheetColors()`. The hour/minute wheels are 150 pt
   tall and sit straight on the pop-up without a card (like the Clock app's timer). Full height looked grey over the black
   exercise screen and left a big empty area; the rejected option was a full-height black page.
+- **Pop-ups over the exercise screen aren't sheets:** iOS pushes a sheet back and switches it to lighter (elevated) colours
+  when another sheet opens on top of it, so the black exercise screen went grey behind the Duration pop-up (Lukas's screen
+  recording). SwiftUI can't turn that off (`presentationBackgroundInteraction` doesn't help). LogView now draws the Finish /
+  Duration pop-up itself with `PopUpHost` (UI/Theme.swift): it slides up, can be pulled down, closes on a tap outside and darkens
+  the page (black 50%, like the web's backdrop). It uses `Color.popBg` / `Color.popCard` (pop-up colours that don't depend on
+  the interface level). From Today it's still a normal sheet. Note / Link video / History opened from the exercise screen are
+  still sheets and will turn the page grey the same way; move them to `PopUpHost` if Lukas notices.
 
 ## Where things stand
 - Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 69 unit tests pass. Lukas has the project

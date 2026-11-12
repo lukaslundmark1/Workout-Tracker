@@ -133,3 +133,57 @@ extension View {
     /// Without it, iOS 26 draws half-height sheets as see-through glass, which looks grey and lighter than the web.
     func sheetColors() -> some View { presentationBackground(Color.bg) }
 }
+
+// MARK: Pop-ups over a page sheet
+// In dark mode iOS pushes a sheet back when another sheet opens on top of it and switches it to lighter colours, so the
+// black exercise screen turned grey behind the Duration pop-up (Lukas, 2026-11-12). SwiftUI can't turn that off, so a
+// pop-up opened from a page sheet is drawn by the page itself with `PopUpHost`: it slides up from the bottom, can be pulled
+// down, closes on a tap outside, and darkens the page like the web app's backdrop instead of lightening it.
+
+extension Color {
+    /// Pop-up colours that don't depend on the interface level (inside a page sheet the level is `.base`):
+    /// #1c1c1e / #2c2c2e in dark mode like the web's --sheet-bg / --sheet-card, #f2f2f7 / white in light mode.
+    static let popBg = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.11, green: 0.11, blue: 0.118, alpha: 1) : .systemGroupedBackground })
+    static let popCard = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.173, green: 0.173, blue: 0.18, alpha: 1) : .white })
+}
+
+/// Shows `content` as a pop-up floating at the bottom of the page while `item` is set.
+struct PopUpHost<Item: Identifiable, Content: View>: View {
+    @Binding var item: Item?
+    @ViewBuilder var content: (Item) -> Content
+    @State private var drag: CGFloat = 0
+    @Environment(\.colorScheme) private var scheme
+
+    private var anim: Animation { Motion.reduced ? .easeInOut(duration: 0.2) : Motion.sheet }
+    private func close() { withAnimation(anim) { item = nil } }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color.black.opacity(item == nil ? 0 : (scheme == .dark ? 0.5 : 0.2))
+                .ignoresSafeArea()
+                .allowsHitTesting(item != nil)
+                .onTapGesture { close() }
+                .accessibilityHidden(true)
+            if let it = item {
+                content(it)
+                    .background(Color.popBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                    .shadow(color: .black.opacity(0.18), radius: 20, y: 4)
+                    .padding(.horizontal, 8).padding(.bottom, 8)     // floats just above the bottom edge, like iOS's own sheets
+                    .offset(y: max(0, drag))
+                    .gesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { drag = $0.translation.height > 0 ? $0.translation.height : $0.translation.height / 6 }
+                            .onEnded { v in
+                                if v.translation.height > 110 || v.predictedEndTranslation.height > 260 { close() }
+                                withAnimation(anim) { drag = 0 }
+                            }
+                    )
+                    .transition(Motion.reduced ? .opacity : .move(edge: .bottom))
+                    .id(it.id)
+            }
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .animation(anim, value: item == nil)
+    }
+}

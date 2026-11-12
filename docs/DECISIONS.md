@@ -231,6 +231,8 @@ Lukas asked to see what the app would be like fully rebuilt for iOS (`docs/NATIV
 - Finish / Duration pop-up: Lukas said it was "the old grey colour" when opened from the stopwatch after finishing, and the
   layout was "a little too high". Shown two options (short floating pop-up vs a full-height black page), he chose the
   short pop-up: only as tall as its content, wheels shorter (150 pt) and without the lighter box behind them.
+  It still turned the exercise screen grey (iOS lightens a sheet when another sheet opens over it), so on the exercise screen
+  the pop-up is drawn by the page itself and darkens the page instead, like the web app.
 
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.

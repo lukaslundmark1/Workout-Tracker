@@ -49,6 +49,12 @@ struct LogView: View {
                 ToolbarItem(placement: .topBarTrailing) { TimerButton(day: day, g: group, onFinish: { finishFor = GroupKey(k: day, g: group) }) }
             }
         }
+        // drawn by the page, not a sheet: a sheet on top would turn this page grey (see PopUpHost)
+        .overlay {
+            PopUpHost(item: $finishFor) { r in
+                FinishSheet(day: r.k, g: r.g, done: { finished in if finished { dismiss() } }, onClose: { Motion.run(Motion.sheet) { finishFor = nil } })
+            }
+        }
         .pageColors()
         .onAppear { store.logDepth += 1 }
         .onChange(of: pos) { old, new in
@@ -56,7 +62,6 @@ struct LogView: View {
         }
         .onDisappear { store.padClose(); store.logDepth = max(0, store.logDepth - 1) }
         .onChange(of: items.count) { _, n in if n == 0 { dismiss() } else if let p = pos, p >= n { pos = n - 1 } }
-        .sheet(item: $finishFor) { r in FinishSheet(day: r.k, g: r.g) { finished in if finished { dismiss() } } }
     }
 
     // Page dots, the rest stopwatch and the number pad, at the bottom of the screen

@@ -8,6 +8,9 @@ struct FinishSheet: View {
     let day: String
     let g: String                      // which workout on the day
     var done: (Bool) -> Void
+    /// Set when the page draws this as a pop-up (PopUpHost) instead of a sheet
+    var onClose: (() -> Void)? = nil
+    private func close() { if let onClose { onClose() } else { dismiss() } }
     @State private var logRest: Bool?
     @State private var h = 0
     @State private var m = 0
@@ -48,7 +51,7 @@ struct FinishSheet: View {
                             Toggle("Log the \(Fmt.plural(c.ok.count, "unticked set")) as shown", isOn: Binding(get: { logIt }, set: { Haptics.select(); logRest = $0 }))
                                 .tint(.green)
                                 .padding(.horizontal, 16).frame(minHeight: 52)
-                                .background(Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                                .background(Color.popCard, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                             footnote("Uses the weight and reps shown in each row." + (c.unticked.count > c.ok.count ? " \(Fmt.plural(c.unticked.count - c.ok.count, "set")) without numbers will be skipped." : ""))
                         }
                         if nothing {
@@ -78,7 +81,7 @@ struct FinishSheet: View {
                     .onChange(of: m) { if ready { Haptics.select() } }
 
                     if c.editing && day == store.today {
-                        Button { store.resume(day, g); Haptics.select(); dismiss() } label: { Label("Resume workout", systemImage: "play.fill") }
+                        Button { store.resume(day, g); Haptics.select(); close() } label: { Label("Resume workout", systemImage: "play.fill") }
                             .buttonStyle(TintedButton()).padding(.top, 14)
                         footnote("Pressed Finish too early, or training again later today? The timer carries on from where it was.")
                             .multilineTextAlignment(.center).frame(maxWidth: .infinity)
@@ -88,12 +91,12 @@ struct FinishSheet: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentH = $0 }
             }
             .scrollBounceBehavior(.basedOnSize)
-            .background(Color.bg)
+            .background(Color.popBg)
             .navigationTitle(c.editing ? "Duration" : "Finish \(store.groups(day).first { $0.id == g }.map { $0.id == otherGroup ? "workout" : $0.name } ?? "workout")")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .cancel) { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
+                    Button(role: .cancel) { close() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(role: .confirm) { save(c, logIt) } label: { Image(systemName: "checkmark") }
@@ -104,6 +107,7 @@ struct FinishSheet: View {
         // a short pop-up, just as tall as what's in it (plus the title bar), floating over the screen (Lukas, 2026-11-12)
         .presentationDetents([contentH > 0 ? .height(min(contentH + 64, 760)) : .medium])
         .sheetColors()
+        .frame(height: onClose != nil ? (contentH > 0 ? min(contentH + 64 + 20, 780) : 440) : nil)   // + room for the home bar
         .onAppear {
             let c = calc()
             h = min(9, c.mins / 60); m = c.mins % 60
@@ -133,10 +137,10 @@ struct FinishSheet: View {
         store.padClose()
         store.clearPause(day, g)
         Motion.run { store.data = d }
-        if c.editing { Haptics.select(); dismiss(); done(false); return }
+        if c.editing { Haptics.select(); close(); done(false); return }
         Haptics.success()
         store.rest = nil
-        dismiss()
+        close()
         done(true)
         // then the workout summary slides up (once this sheet, and the exercise screen if it was open, have gone)
         if !store.groupSets(day, g).isEmpty { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { store.summaryFor = GroupKey(k: day, g: g) } }
