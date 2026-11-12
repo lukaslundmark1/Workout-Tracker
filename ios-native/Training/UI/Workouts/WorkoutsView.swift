@@ -23,6 +23,7 @@ struct WorkoutsView: View {
             }
             .listStyle(.insetGrouped)
             .listSectionSpacing(14)
+            .modifier(RestRoom())
             .navigationTitle("Workouts")
         }
         .sheet(item: $openPlan) { p in PlanView(planId: p.id).presentationDragIndicator(.visible) }
@@ -47,13 +48,8 @@ struct WorkoutsView: View {
             Section {
                 ForEach(list) { p in
                     Button { openPlan = Ident(id: p.id) } label: {
-                        Row(title: p.name, sub: store.planSummary(p)) {
-                            if p.id == active {
-                                Text("Active").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.green)
-                                    .padding(.horizontal, 9).padding(.vertical, 3)
-                                    .background(Color.green.opacity(0.15), in: Capsule())
-                            }
-                        }
+                        // "Active" sits by the name, so the line under it gets the full width
+                        Row(title: p.name, sub: store.planSummary(p), tag: p.id == active ? "Active" : nil) { EmptyView() }
                     }
                 }
             }
@@ -97,12 +93,21 @@ struct Ident: Identifiable, Hashable { var id: String }
 struct Row<Trailing: View>: View {
     var title: String
     var sub: String? = nil
+    var tag: String? = nil
     var chevron = true
     @ViewBuilder var trailing: Trailing
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).foregroundStyle(Color.primary)
+                HStack(spacing: 8) {
+                    Text(title).foregroundStyle(Color.primary)
+                    if let tag {
+                        Text(tag).font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.green)
+                            .padding(.horizontal, 8).padding(.vertical, 2)
+                            .background(Color.green.opacity(0.15), in: Capsule())
+                            .fixedSize()
+                    }
+                }
                 if let sub { Text(sub).font(.system(size: 15)).foregroundStyle(Color.label2) }
             }
             Spacer(minLength: 6)

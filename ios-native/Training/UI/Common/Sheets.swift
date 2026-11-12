@@ -357,7 +357,7 @@ struct SettingsView: View {
                     Section {
                         Button("Start over with the sample data", role: .destructive) { Haptics.warn(); confirmReset = true }
                     } footer: {
-                        Text("This is a prototype to compare how a fully native app feels. The sample training stays on this phone: signing in starts from your account's own training.")
+                        Text("Puts the made-up sample training back, to try things out. It stays on this phone: signing in starts from your account's own training.")
                     }
                 }
                 if signedIn {
@@ -368,8 +368,9 @@ struct SettingsView: View {
                     }
                 }
             }
+            .modifier(RestRoom())
             .navigationTitle("Settings")
-            .confirmationDialog("Replace everything in this prototype with the sample data?", isPresented: $confirmReset, titleVisibility: .visible) {
+            .confirmationDialog("Replace everything on this phone with the sample data?", isPresented: $confirmReset, titleVisibility: .visible) {
                 Button("Start over", role: .destructive) { store.resetSampleData(); exportURL = store.exportBackupFile() }
             }
             .fileImporter(isPresented: $picking, allowedContentTypes: [.json]) { result in

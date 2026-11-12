@@ -66,10 +66,12 @@ enum Haptics {
 struct PressStyle: ButtonStyle {
     var scale: CGFloat = 0.94
     func makeBody(configuration: Configuration) -> some View {
+        // the press animation is scoped to the press effect only: a button that moves away when tapped
+        // (Done on the number pad) must move with its surroundings, not on the press spring
         configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1)
-            .opacity(configuration.isPressed ? 0.75 : 1)
-            .animation(configuration.isPressed ? .easeOut(duration: 0.08) : Motion.pop, value: configuration.isPressed)
+            .animation(configuration.isPressed ? .easeOut(duration: 0.08) : Motion.pop) {
+                $0.scaleEffect(configuration.isPressed ? scale : 1).opacity(configuration.isPressed ? 0.75 : 1)
+            }
     }
 }
 
@@ -77,8 +79,9 @@ struct PressStyle: ButtonStyle {
 struct CardPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(configuration.isPressed ? Color.card2 : Color.clear)
-            .animation(.easeOut(duration: configuration.isPressed ? 0.05 : 0.25), value: configuration.isPressed)
+            .animation(.easeOut(duration: configuration.isPressed ? 0.05 : 0.25)) {
+                $0.background(configuration.isPressed ? Color.card2 : Color.clear)
+            }
     }
 }
 

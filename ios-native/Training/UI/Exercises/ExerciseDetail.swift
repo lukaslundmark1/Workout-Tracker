@@ -225,40 +225,76 @@ struct HistoryList: View {
     @Environment(Store.self) private var store
     let exId: String
     var ix: SetIndex? = nil              // someone else's sets (a friend's); nil = yours
+    @State private var playing: VideoRoute?
+    @State private var openLog: LogRoute?
 
     var body: some View {
         let x = ix ?? store.index
-        let dates = Array((x.exDates[exId] ?? []).reversed()), prs = x.prSets(exId), u = store.units
+        let dates = Array((x.exDates[exId] ?? []).reversed()), prs = x.prSets(exId)   // PRs once per list, not per card
         Text("History").font(.system(size: 20, weight: .bold)).padding(.horizontal, 4).padding(.top, 26).padding(.bottom, 8)
         if dates.isEmpty {
             Text("No sets logged yet.").foregroundStyle(Color.label2).frame(maxWidth: .infinity).padding(.vertical, 18).card()
         }
         LazyVStack(spacing: 10) {
             ForEach(dates, id: \.self) { k in
-                let ss = x.byExDate[exId + "|" + k] ?? []
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Text(store.relDay(k)).fontWeight(.semibold)
-                        Spacer()
-                        Text("e1RM \(fmtStat(u.toU(ss.map(e1rm).max() ?? 0), .e1rm)) \(u.u)").font(.system(size: 15)).foregroundStyle(Color.label2).monospacedDigit()
-                    }
-                    .padding(.bottom, 6)
-                    ForEach(Array(ss.enumerated()), id: \.element.id) { i, s in
-                        HStack(spacing: 12) {
-                            Text("\(i + 1)").font(.rounded(15, .bold)).foregroundStyle(Color.label3).frame(width: 18, alignment: .leading)
-                            Text("\(u.w(s.weight)) \(u.u) × \(s.reps)").monospacedDigit()
-                            if prs[k] == s.id {
-                                Text("PR").font(.system(size: 11, weight: .heavy)).foregroundStyle(Color.orange)
-                                    .padding(.horizontal, 6).padding(.vertical, 2).background(Color.orange.opacity(0.16), in: Capsule())
-                            }
-                        }
-                        .padding(.vertical, 3)
-                    }
+                // Your own days open that day's exercise screen on top; closing it comes back here (2026-11-12, Lukas)
+                if ix == nil, store.logStart(exId, k) != nil {
+                    Button { Haptics.select(); openLog = LogRoute(day: k, exId: exId) } label: { dayCard(k, x, prs, tappable: true) }
+                        .buttonStyle(CardPressStyle())
+                        .card()
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .accessibilityHint("Opens the exercise on that day")
+                } else {
+                    dayCard(k, x, prs, tappable: false).card()
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .card()
             }
         }
+        .sheet(item: $playing) { VideoPlayerSheet(route: $0) }
+        .sheet(item: $openLog) { r in
+            LogView(day: r.day, startExId: r.exId, startIndex: store.logStart(r.exId, r.day) ?? 0)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(38)
+        }
+    }
+
+    private func dayCard(_ k: String, _ x: SetIndex, _ prs: [String: String], tappable: Bool) -> some View {
+        let ss = x.byExDate[exId + "|" + k] ?? [], u = store.units
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Text(store.relDay(k)).fontWeight(.semibold).foregroundStyle(.primary)
+                Spacer()
+                Text("e1RM \(fmtStat(u.toU(ss.map(e1rm).max() ?? 0), .e1rm)) \(u.u)").font(.system(size: 15)).foregroundStyle(Color.label2).monospacedDigit()
+                if tappable {
+                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.label3)
+                }
+            }
+            .padding(.bottom, 6)
+            ForEach(Array(ss.enumerated()), id: \.element.id) { i, s in
+                HStack(spacing: 12) {
+                    Text("\(i + 1)").font(.rounded(15, .bold)).foregroundStyle(Color.label3).frame(width: 18, alignment: .leading)
+                    Text("\(u.w(s.weight)) \(u.u) × \(s.reps)").monospacedDigit().foregroundStyle(.primary)
+                    if prs[k] == s.id {
+                        Text("PR").font(.system(size: 11, weight: .heavy)).foregroundStyle(Color.orange)
+                            .padding(.horizontal, 6).padding(.vertical, 2).background(Color.orange.opacity(0.16), in: Capsule())
+                    }
+                    // videos linked to the set (yours only: a friend's are in their Photos)
+                    if ix == nil, let vs = s.v, !vs.isEmpty {
+                        Spacer(minLength: 0)
+                        HStack(spacing: 6) {
+                            ForEach(vs.prefix(3), id: \.self) { id in
+                                Button { Haptics.select(); playing = VideoRoute(setId: s.id, start: id) } label: { VideoThumb(id: id, size: 52) }
+                                    .buttonStyle(PressStyle(scale: 0.92))
+                            }
+                            if vs.count > 3 { Text("+\(vs.count - 3)").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.label2) }
+                        }
+                    }
+                }
+                .padding(.vertical, 3)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }

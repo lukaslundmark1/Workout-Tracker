@@ -48,11 +48,11 @@ struct LogView: View {
                 ToolbarItem(placement: .topBarTrailing) { TimerButton(day: day, g: group, onFinish: { finishFor = GroupKey(k: day, g: group) }) }
             }
         }
-        .onAppear { store.logOpen = true }
+        .onAppear { store.logDepth += 1 }
         .onChange(of: pos) { old, new in
             if old != nil, new != nil, old != new { Haptics.select(); store.padClose() }
         }
-        .onDisappear { store.padClose(); store.logOpen = false }
+        .onDisappear { store.padClose(); store.logDepth = max(0, store.logDepth - 1) }
         .onChange(of: items.count) { _, n in if n == 0 { dismiss() } else if let p = pos, p >= n { pos = n - 1 } }
         .sheet(item: $finishFor) { r in FinishSheet(day: r.k, g: r.g) { finished in if finished { dismiss() } } }
     }
@@ -68,7 +68,8 @@ struct LogView: View {
             }
             .padding(.bottom, 8)
             if store.pad != nil {
-                NumberPad().transition(.move(edge: .bottom))
+                // slides all the way off: its own height only would leave its top row peeking out above the home bar
+                NumberPad().transition(Motion.reduced ? .opacity : .offset(y: NumberPad.height + store.screen.safeBottom + 24))
             }
         }
         .animation(Motion.reduced ? .easeInOut(duration: 0.2) : Motion.sheet, value: store.pad == nil)
@@ -161,6 +162,7 @@ struct LogPage: View {
     var goTo: (String) -> Void
     @State private var frames = RowFrames()
     @State private var editNote = false
+    @State private var linkVideo = false
     @State private var showAdd = false
     @State private var history = false
 
@@ -179,6 +181,7 @@ struct LogPage: View {
                 .onChange(of: store.pad) { _, p in reveal(p, m, proxy) }
             }
             .sheet(isPresented: $editNote) { NoteSheet(exId: m.ex.id) }
+            .sheet(isPresented: $linkVideo) { LinkVideoSheet(day: day, exId: m.ex.id, g: m.g) }
             .sheet(isPresented: $history) { ExerciseDetail(exId: m.ex.id, mode: .history).presentationDragIndicator(.visible) }
             .sheet(isPresented: $showAdd) { AddSheet(day: day, exercisesOnly: true) { exId in
                 if let exId { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { goTo(exId) } }
@@ -186,6 +189,12 @@ struct LogPage: View {
         } else {
             Color.bg
         }
+    }
+
+    private var linkVideoButton: some View {
+        Button { store.padClose(); linkVideo = true } label: { Label("Link video", systemImage: "video.badge.plus") }
+            .font(.system(size: 15, weight: .medium)).foregroundStyle(Color.tint)
+            .buttonStyle(PressStyle())
     }
 
     // Keep the field you're typing in visible above the number pad
@@ -205,7 +214,8 @@ struct LogPage: View {
         let pr = store.prFor(m.ex.id, day)
         VStack(alignment: .leading, spacing: 0) {
             let gs = store.groups(day)
-            Text("Exercise \(m.idx + 1) of \(m.total)" + (gs.count > 1 ? " · " + (gs.first { $0.id == m.g }?.name ?? "") : ""))
+            // another day (opened from History or the calendar) says which day it is
+            Text((day != store.today ? Fmt.short(day) + " · " : "") + "Exercise \(m.idx + 1) of \(m.total)" + (gs.count > 1 ? " · " + (gs.first { $0.id == m.g }?.name ?? "") : ""))
                 .font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.label2)
                 .padding(.horizontal, 2).padding(.top, 6)
             Text(m.ex.name)
@@ -248,13 +258,18 @@ struct LogPage: View {
                 .buttonStyle(CardPressStyle())
                 .card()
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .padding(.top, -4).padding(.bottom, 14)
+                .padding(.top, -4).padding(.bottom, 10)
                 .accessibilityLabel("Note: \(note). Tap to edit")
+                linkVideoButton
+                    .padding(.horizontal, 6).padding(.bottom, 16)
             } else {
-                Button { editNote = true } label: { Label("Add a note", systemImage: "pencil") }
-                    .font(.system(size: 15, weight: .medium)).foregroundStyle(Color.tint)
-                    .buttonStyle(PressStyle())
-                    .padding(.horizontal, 6).padding(.top, -4).padding(.bottom, 16)
+                HStack(spacing: 22) {
+                    Button { editNote = true } label: { Label("Add a note", systemImage: "pencil") }
+                    linkVideoButton
+                }
+                .font(.system(size: 15, weight: .medium)).foregroundStyle(Color.tint)
+                .buttonStyle(PressStyle())
+                .padding(.horizontal, 6).padding(.top, -4).padding(.bottom, 16)
             }
 
             if !m.ex.instructions.isEmpty { Instructions(text: m.ex.instructions).padding(.bottom, 14) }

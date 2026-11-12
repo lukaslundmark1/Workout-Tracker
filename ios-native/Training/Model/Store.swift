@@ -86,8 +86,10 @@ final class Store {
     var today: String = Day0.today { didSet { schedCache = nil } }
     var selected: String = Day0.today
     var drafts: [String: [Int: Draft]] = [:]      // "exId|day" → row → typed values (unticked rows)
+    @ObservationIgnored var keptVideos: [String: [String]] = [:]   // "exId|day|row" → videos of an unticked set (back on re-tick)
     var edits: [String: [Int: Draft]] = [:]       // same, for a ticked set being edited (saved when you leave the field)
-    var bad: Set<String> = []                      // "exId|day|row|w" fields that need a number
+    var bad: Set<String> = []                      // "exId|day|row|w" fields that need a number (flash red for a moment)
+    private var badFlash = 0
     var pad: PadState?
     var rest: RestState? { didSet { saveRest() } }
     var toast: ToastMsg?
@@ -95,7 +97,8 @@ final class Store {
     var justUnticked: String?                      // "exId|day|row"
     var newRow: String?                            // "exId|day|row": grows in
     var tab: AppTab = .today
-    var logOpen = false
+    var logDepth = 0                               // exercise screens open (one can open from another's History)
+    var logOpen: Bool { logDepth > 0 }
     var collapsed: Set<String> = []                // "day|group" folded on Today (open by default)
     var reordering = false                         // an exercise is being dragged on Today (the pages hold still)
     var summaryFor: GroupKey?                      // the workout whose summary should open (after Finish)
@@ -345,25 +348,41 @@ final class Store {
             padCommit()
             if p.i == i {
                 p.fresh = true
-                if done == nil { let nx = i + 1; pad = nx < m.n ? PadState(day: k, exId: m.ex.id, g: m.g, i: nx, field: .w, fresh: true) : nil }
+                if done == nil {
+                    // a tick that can't log (an empty field) keeps the pad where it is, on the field to fill in
+                    let v = suggest(m, i)
+                    if parseW(v.w) != nil && parseR(v.r) != nil { let nx = i + 1; pad = nx < m.n ? PadState(day: k, exId: m.ex.id, g: m.g, i: nx, field: .w, fresh: true) : nil }
+                    else { pad = p }
+                }
                 else { pad = p }
             }
         }
         if let done {
             Haptics.select()
             drafts[m.dkey, default: [:]][i] = Draft(w: units.w(done.weight), r: String(done.reps))
+            if let v = done.v { keptVideos[m.dkey + "|\(i)"] = v }      // untick + tick again keeps its videos
             data.sets = data.sets.filter { $0.id != done.id }
             justUnticked = m.dkey + "|\(i)"
             return
         }
         let v = suggest(m, i)
         let w = parseW(v.w), r = parseR(v.r)
-        if w == nil { bad.insert(m.dkey + "|\(i)|w") }
-        if r == nil { bad.insert(m.dkey + "|\(i)|r") }
-        guard let w, let r else { Haptics.error(); return }
+        guard let w, let r else {
+            // the empty fields flash red, then fade back
+            let keys = [w == nil ? m.dkey + "|\(i)|w" : nil, r == nil ? m.dkey + "|\(i)|r" : nil].compactMap { $0 }
+            bad.formUnion(keys)                                            // (SetRow animates the red in and out)
+            badFlash += 1
+            let token = badFlash
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { [weak self] in
+                guard let self, self.badFlash == token else { return }   // tapped again: that flash clears it
+                self.bad.subtract(keys)
+            }
+            Haptics.error(); return
+        }
         Haptics.impact()
         let prBefore = prFor(m.ex.id, k)?.set.id
-        let newSet = LoggedSet(id: newId(), exId: m.ex.id, date: k, slot: i, weight: units.fromU(w), reps: r, ts: nowMs(), w: m.g)
+        let newSet = LoggedSet(id: newId(), exId: m.ex.id, date: k, slot: i, weight: units.fromU(w), reps: r, ts: nowMs(), w: m.g,
+                               v: keptVideos.removeValue(forKey: m.dkey + "|\(i)"))
         var d = data
         // the first set of a workout today starts its timer
         setSession(k, m.g, sessionOf(k, m.g) ?? (k == today ? Session(start: nowMs()) : nil), in: &d)

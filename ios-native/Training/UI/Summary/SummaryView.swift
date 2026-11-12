@@ -7,7 +7,7 @@ struct SummaryView: View {
     @Environment(\.dismiss) private var dismiss
     let day: String
     var g: String? = nil                   // one workout, or the whole day
-    var open: (String) -> Void             // tap an exercise: open it on the exercise screen
+    @State private var history: Ident?     // tap an exercise: its History slides up on top; closing it comes back here
     @State private var shown = false       // numbers count up and the check pops when it opens
 
     var body: some View {
@@ -105,9 +105,10 @@ struct SummaryView: View {
             if Motion.reduced { shown = true; return }
             withAnimation(.spring(response: 0.5, dampingFraction: 0.55).delay(0.15)) { shown = true }
         }
+        .sheet(item: $history) { h in ExerciseDetail(exId: h.id, mode: .history).presentationDragIndicator(.visible) }
     }
 
-    private func go(_ exId: String) { Haptics.select(); dismiss(); open(exId) }
+    private func go(_ exId: String) { Haptics.select(); history = Ident(id: exId) }
 
     /// A number tile; whole numbers count up from 0 when the summary opens
     private func stat(_ text: String, _ label: String, count: Double?, volume: Bool = false) -> some View {

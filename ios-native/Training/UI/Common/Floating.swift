@@ -1,5 +1,16 @@
 import SwiftUI
 
+/// While the rest stopwatch shows, every tab gets room at the bottom to scroll its last rows above it.
+struct RestRoom: ViewModifier {
+    @Environment(Store.self) private var store
+    func body(content: Content) -> some View {
+        let shown = store.rest.map { $0.date == store.today } ?? false
+        content
+            .safeAreaPadding(.bottom, shown ? 62 : 0)
+            .animation(Motion.reduced ? .easeInOut(duration: 0.2) : Motion.sheet, value: shown)
+    }
+}
+
 /// Rest stopwatch: counts up from the last ticked set. ✕ turns it off.
 struct RestPill: View {
     @Environment(Store.self) private var store
@@ -26,7 +37,9 @@ struct RestPill: View {
         }
         .padding(.leading, 20).padding(.trailing, 6)
         .frame(height: 54)
+        .background(Color.card.opacity(0.75), in: Capsule())   // solid enough that list text behind it doesn't show through
         .glassEffect(.regular, in: Capsule())
+        .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
         .padding(.horizontal, 24)
     }
 }

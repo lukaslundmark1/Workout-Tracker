@@ -17,6 +17,7 @@ struct TodayView: View {
     @State private var showAdd = false
     @State private var finishFor: GroupKey?
     @State private var moveFor: MoveRoute?
+    @State private var showCalendar = false
 
     private var firstDay: Int { store.data.settings.weekStart }
     private var baseWeek: String { Day0.weekStart(base, firstDay: firstDay) }
@@ -55,7 +56,8 @@ struct TodayView: View {
             let w = weekOff(of: k)
             if weekPos != w { Motion.run { weekPos = w } }
         }
-        .onChange(of: store.selected) { _, k in sync(to: k, animated: true) }
+        // a far jump (the calendar, Today from far away) lands at once instead of scrolling past every day in between
+        .onChange(of: store.selected) { old, k in sync(to: k, animated: abs(Day0.between(old, k)) <= 14) }
         .sheet(isPresented: $showAdd) {
             AddSheet(day: store.selected) { exId in
                 // a single exercise opens right away, like the web app; a workout stays on the day
@@ -64,12 +66,18 @@ struct TodayView: View {
         }
         .sheet(item: $finishFor) { r in FinishSheet(day: r.k, g: r.g) { _ in } }
         .sheet(item: Binding(get: { store.summaryFor }, set: { store.summaryFor = $0 })) { r in
-            SummaryView(day: r.k, g: r.g) { exId in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openLog = LogRoute(day: r.k, exId: exId, g: r.g) }
-            }
-            .presentationDragIndicator(.visible)
+            SummaryView(day: r.k, g: r.g)
+                .presentationDragIndicator(.visible)
         }
         .sheet(item: $moveFor) { r in MoveSheet(from: r.k, group: r.g) }
+        .sheet(isPresented: $showCalendar) {
+            // opens on the selected day's month, or the shown week's when you've paged to another week
+            CalendarSheet(start: (0...6).contains(Day0.between(shownWeek, store.selected)) ? store.selected : shownWeek) { k in
+                guard k != store.selected else { return }
+                store.padClose()
+                Motion.run { store.selected = k }
+            }
+        }
         // Stored copies of planned days that no longer match the plan are dropped (like every redraw in the web app)
         .onChange(of: store.data) { store.purgeStalePlanDays() }
         .onAppear { store.purgeStalePlanDays() }
@@ -87,12 +95,25 @@ struct TodayView: View {
         let label = Fmt.weekLabel(shownWeek)
         let otherWeek = (weekPos ?? 0) != weekOff(of: store.today)
         return HStack(spacing: 8) {
-            Text("\(label.text)\(Text(label.year.map { " " + $0 } ?? "").foregroundStyle(Color.label2))")
-                .font(.system(size: 26, weight: .bold))
-                .tracking(-0.5)
-                .lineLimit(1)
-                .contentTransition(.numericText())
-                .animation(Motion.soft, value: label.text)
+            // Tap the month for the calendar (the chevron says it opens something)
+            Button { Haptics.select(); showCalendar = true } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(label.text)\(Text(label.year.map { " " + $0 } ?? "").foregroundStyle(Color.label2))")
+                        .font(.system(size: 26, weight: .bold))
+                        .tracking(-0.5)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                        .animation(Motion.soft, value: label.text)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Color.tint)
+                }
+                .foregroundStyle(.primary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle(scale: 0.95))
+            .accessibilityLabel("\(label.text) \(label.year ?? ""), calendar")
+            .accessibilityHint("Opens the calendar")
             Spacer(minLength: 4)
             if otherWeek {
                 Button("Today") {

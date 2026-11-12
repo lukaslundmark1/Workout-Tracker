@@ -28,7 +28,7 @@ struct ExercisesView: View {
                         }
                         ForEach(mine) { e in
                             Button { openEx = Ident(id: e.id) } label: {
-                                Row(title: e.name, sub: store.exDates(e.id).last.map { "Last logged \(Fmt.short($0))" } ?? "Never logged") { EmptyView() }
+                                Row(title: e.name, sub: store.exDates(e.id).last.map { "Last logged \(lastLogged($0))" } ?? "Never logged") { EmptyView() }
                             }
                         }
                     }
@@ -42,6 +42,7 @@ struct ExercisesView: View {
             .listSectionSpacing(14)
             .animation(Motion.soft, value: mine.map(\.id))
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+            .modifier(RestRoom())
             .navigationTitle("Exercises")
         }
         .sheet(item: $openEx) { e in ExerciseDetail(exId: e.id, mode: .detail).presentationDragIndicator(.visible) }
@@ -51,6 +52,13 @@ struct ExercisesView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openEx = Ident(id: id) }
             }
         }
+    }
+}
+
+extension ExercisesView {
+    /// "today", "yesterday", else "Tue 10 Nov"
+    func lastLogged(_ k: String) -> String {
+        k == store.today ? "today" : k == Day0.add(store.today, -1) ? "yesterday" : Fmt.short(k)
     }
 }
 
@@ -101,14 +109,6 @@ struct LibraryView: View {
         NavigationStack {
             List {
                 Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Chips(options: Library.muscles, selected: $muscle)
-                        Chips(options: Library.equipment, selected: $equip)
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                }
-                Section {
                     Button { creating = true } label: { Label("Create your own exercise", systemImage: "plus.circle.fill") }
                         .foregroundStyle(Color.tint)
                 }
@@ -128,6 +128,15 @@ struct LibraryView: View {
                 }
             }
             .listSectionSpacing(12)
+            .contentMargins(.top, 8, for: .scrollContent)
+            // filters stay put under the search field and run edge to edge while you scroll them
+            .safeAreaBar(edge: .top) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Chips(options: Library.muscles, selected: $muscle)
+                    Chips(options: Library.equipment, selected: $equip)
+                }
+                .padding(.bottom, 6)
+            }
             .animation(Motion.soft, value: list.map(\.id))
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search exercises")
             .navigationTitle("Exercise database")
@@ -163,10 +172,9 @@ struct Chips: View {
             HStack(spacing: 8) {
                 ForEach(options, id: \.key) { o in ChipButton(title: o.name, on: selected == o.key) { selected = selected == o.key ? "" : o.key } }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 16)       // lines up with the search field
         }
         .scrollIndicators(.hidden)
-        .scrollClipDisabled()        // chips run to the screen edges while you scroll them
     }
 }
 

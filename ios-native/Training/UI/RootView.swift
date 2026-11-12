@@ -19,7 +19,7 @@ struct RootView: View {
                 WorkoutsView()
             }
             Tab(value: AppTab.today) {
-                TodayView()
+                TodayView().modifier(RestRoom())
             } label: {
                 Label { Text("Today") } icon: { Image(uiImage: TodayIcon.image(day: Day0.dayOfMonth(store.today))) }
             }
@@ -88,21 +88,6 @@ enum TodayIcon {
             .frame(width: 23, height: 23)
             .padding(1.5)
             .foregroundStyle(.black)
-        }
-    }
-}
-
-struct ComingSoon: View {
-    let title: String, icon: String, text: String
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView {
-                Label(title, systemImage: icon)
-            } description: {
-                Text(text + "\n\nThis is the prototype: try the Today tab.")
-            }
-            .navigationTitle(title)
-            .background(Color.bg)
         }
     }
 }

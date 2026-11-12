@@ -6,6 +6,7 @@ struct SetRow: View {
     let m: LogModel
     let i: Int
     let isPR: Bool
+    @State private var playing: VideoRoute?
 
     var body: some View {
         let done = m.bySlot[i]
@@ -15,8 +16,19 @@ struct SetRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(i + 1)").font(.rounded(17, .bold)).foregroundStyle(done != nil ? Color.primary : Color.label3)
                 if isPR { Text("PR").font(.system(size: 9, weight: .heavy)).tracking(0.4).foregroundStyle(Color.orange) }
+                if let done, let first = done.v?.first {
+                    // linked video(s): tap to play
+                    Button { Haptics.select(); playing = VideoRoute(setId: done.id, start: first) } label: {
+                        Image(systemName: "video.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.tint)
+                            .frame(width: 30, height: 18, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle(scale: 0.8))
+                    .accessibilityLabel("Play video of set \(i + 1)")
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
+                }
             }
             .frame(width: 30, alignment: .leading)
+            .animation(Motion.soft, value: done?.v)
             field(.w, v.w, placeholder: u.u, done: done != nil)
                 .accessibilityLabel("Set \(i + 1) weight in \(u.u)")
             field(.r, v.r, placeholder: "reps", done: done != nil)
@@ -29,6 +41,7 @@ struct SetRow: View {
         }
         .padding(.leading, 18).padding(.trailing, 10)
         .frame(minHeight: 60)
+        .sheet(item: $playing) { VideoPlayerSheet(route: $0) }
     }
 
     private func field(_ f: PadField, _ value: String, placeholder: String, done: Bool) -> some View {
@@ -48,9 +61,13 @@ struct SetRow: View {
                 .frame(maxWidth: .infinity).frame(height: 42)
                 .background(fresh ? Color.tint.opacity(0.16) : active ? Color.card : done ? Color.fill : Color.fillFaint,
                             in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(isBad ? Color.red : active ? Color.tint : .clear, lineWidth: 2)
+                // empty field on a tick: flashes red quickly, fades back slowly
+                .animation(isBad ? .easeOut(duration: 0.12) : .easeOut(duration: 0.5)) { v in
+                    v.background(Color.red.opacity(isBad ? 0.18 : 0), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(isBad ? Color.red : active ? Color.tint : .clear, lineWidth: 2)
+                        }
                 }
                 .animation(.easeOut(duration: 0.2), value: active)
                 .animation(.easeOut(duration: 0.35), value: done)

@@ -72,6 +72,13 @@ extension Store {
         return d.items.first { $0.exId == s.exId }?.w
     }
     /// An exercise's sets on a day, in one group
+    /// The exercise screen's page for an exercise on a day (the workout it was logged in first; nil = not on that day)
+    func logStart(_ exId: String, _ k: String) -> Int? {
+        let items = dayOf(k).items
+        return items.indices.first { items[$0].exId == exId && !setsOf(exId, k, items[$0].w ?? otherGroup).isEmpty }
+            ?? items.firstIndex { $0.exId == exId }
+    }
+
     func setsOf(_ exId: String, _ k: String, _ g: String) -> [LoggedSet] {
         let all = setsOf(exId, k)
         if all.isEmpty { return all }

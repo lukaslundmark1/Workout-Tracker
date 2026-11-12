@@ -192,6 +192,21 @@ Lukas asked to see what the app would be like fully rebuilt for iOS (`docs/NATIV
 - **One fix not in the web app:** if the phone is briefly offline when Friends starts, the friend code is fetched again a few seconds later (the web app shows an error until reopened).
 - Big blue buttons now look dimmed when they can't be pressed (everywhere in the β app).
 
+## Fully native app: calendar from the month name (2026-11-12, Lukas)
+- Tapping the month name at the top of Today opens a calendar sheet (a blue ⌄ next to the name shows it can be tapped; Lukas asked for an icon so it's obvious). Months scroll from the first month trained (at least a year back) to a year ahead; same marks as Move (dot = trained, ring = planned), the selected day blue, today red, a Today button. Tap a day to go there. Jumps over 14 days now land at once instead of scrolling through every day between.
+
+## Fully native app: videos linked to sets (2026-11-12, Lukas)
+- **Where videos live:** options were (1) link to the video in Photos, (2) copy into the app's own iCloud space, (3) keep inside the app. Lukas chose 1: free, no extra storage, works with the free Apple ID (2 needs the $99 account for iCloud), and with iCloud Photos the link survives a new phone because the set stores Photos' **cloud identifier** (same on every device on that iCloud account; `local:<id>` fallback when Photos can't give one). Firebase Storage was ruled out (needs the paid plan; videos are big). Deleting the video from Photos breaks the link (the player says so).
+- **Per set** (Lukas). Stored as `v: [ids]` on the set document; absent when empty, so existing sets keep their sync hash. No rule change (sets have no field limits). The web app keeps the field (it stores incoming sets as they are) and doesn't show it; friends can't see videos; backups (`Clean.backup`) drop it.
+- **UI:** "Link video" next to "Add a note" on the exercise screen → choose the done set(s) → Photos picker (videos only, several at once) → each chosen video goes on each chosen set. A blue video icon under the set number plays them; History shows thumbnails (with length) on those sets. The player swipes between a set's videos; ⋯ → "Unlink from this set". Untick + tick again keeps a set's videos (in memory). Needs Photos access (asked once); with "some photos only", picked videos may not play. Sound: the player switches the app to movie playback (`AVAudioSession` `.playback`) while open, so a video has sound with the phone on silent (iOS's default for apps muted it; Lukas reported no audio), and hands the sound back to other apps when it closes.
+
+## Fully native app: History days open the exercise screen (2026-11-12, Lukas)
+- Tapping a day in an exercise's History (from the exercise screen's "Last time" or the Exercises tab) opens that day's exercise screen on top, on that exercise (the workout it was logged in, if it's in two); swiping down or ⌄ goes back to History, like the summary → History. Each day card has a ›; a friend's history isn't tappable. The exercise screen now shows the date ("Thu 29 Oct · Exercise 1 of 4") when it isn't today.
+
+## Fully native app: number pad kg ↔ Reps switch (2026-11-12, Lukas)
+- Lukas: switching kg ↔ Reps was smooth with empty fields but choppy once a value was typed or logged. Cause: two animation rules on the pad (a 0.15 s fade keyed on the value, the spring keyed on the field); a switch that also changed the number shown took the fast one, so the capsule snapped across in ~4 frames. Now one rule: a switch (field, set or exercise changed) springs, typing a digit fades quickly. Checked frame by frame: the capsule now takes ~8 frames either way.
+- "Next set ›" was cut to "Next..." at the standard text size on a 6.3" phone: the switch is a little narrower and the button text never truncates.
+
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.
 - Push: diff each record's hash against what was last synced, send in batches, debounced 600 ms.

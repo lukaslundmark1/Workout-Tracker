@@ -120,9 +120,13 @@ nonisolated struct LoggedSet: Codable, Identifiable, Equatable {
     var ts: Double
     /// Which of the day's workouts it was logged in (see `WorkoutItem.w`). Missing on older sets.
     var w: String?
+    /// Videos linked to this set (β app only): Photos cloud identifiers (the same on every device with iCloud Photos),
+    /// or "local:<id>" when Photos couldn't give one. Absent (not empty) when there are none, so hashes stay as before.
+    var v: [String]?
 
-    init(id: String, exId: String, date: String, slot: Int, weight: Double, reps: Int, ts: Double, w: String? = nil) {
+    init(id: String, exId: String, date: String, slot: Int, weight: Double, reps: Int, ts: Double, w: String? = nil, v: [String]? = nil) {
         self.id = id; self.exId = exId; self.date = date; self.slot = slot; self.weight = weight; self.reps = reps; self.ts = ts; self.w = w
+        self.v = v
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -134,6 +138,8 @@ nonisolated struct LoggedSet: Codable, Identifiable, Equatable {
         reps = c.lenientInt(.reps) ?? 0
         ts = c.lenientDouble(.ts) ?? 0
         w = try? c.decodeIfPresent(String.self, forKey: .w)
+        let vs = (try? c.decodeIfPresent([String].self, forKey: .v))?.filter { !$0.isEmpty && $0.count <= 300 }.prefix(20)
+        v = vs.map(Array.init).flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 

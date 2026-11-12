@@ -1,19 +1,54 @@
-# Handoff: Training β (native SwiftUI app), next up: polish pass (step 7)
+# Handoff: Training β (native SwiftUI app), next up: performance and optimization
 
-Updated 2026-11-12 at the end of the session that added Friends (friend codes, requests, profiles, sending workouts
-and plans). Before that: accounts + sync and the day overhaul (workouts as groups, Move, Finish per workout). **Read in this order:** `../CLAUDE.md` (how Lukas works), this file, `../docs/NATIVE-REBUILD.md`
-(the original plan and the data format), the "Fully native app" entries in `../docs/DECISIONS.md` (every choice and why),
-`README.md` here. The web app (`../app.js`) is the reference: when docs and code disagree, the code wins.
+Updated 2026-11-12 (late) at the end of a feature session: calendar from the month name, videos linked to sets, History
+days open the exercise screen, video sound on silent, smooth kg ↔ Reps switch. Before that: a polish session, Friends,
+accounts + sync and the day overhaul. **Read in this order:** `../CLAUDE.md` (how Lukas works), this file,
+`../docs/NATIVE-REBUILD.md` (the original plan and the data format), the "Fully native app" entries in
+`../docs/DECISIONS.md` (every choice and why), `README.md` here. The web app (`../app.js`) is the reference: when docs and
+code disagree, the code wins. `../dev/README.md` → performance rules and `../docs/DECISIONS.md` → "Performance (v0.26)"
+describe how the *web* app was made fast; the same ideas (index, caches, no work during gestures) apply here.
 
 ## Where things stand
-- Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 59 unit tests pass. Lukas has the project
+- Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 63 unit tests pass. Lukas has the project
   open in Xcode with his Team set; he presses ▶ to put it on his iPhone (every native change needs ▶ again).
-- **Nothing since commit `a153241` is committed** (accounts and sync, the day overhaul, per-workout Finish, Friends, the
-  `GoogleService-Info.plist`). Lukas was offered a commit several times and hasn't said yes yet: ask once at a natural point
-  (commit message style `native: <what>` + bullets). Pushing only publishes the folder on GitHub Pages; it doesn't change the web app.
+- The polish and feature sessions (below), this file, `../docs/DECISIONS.md` and the Xcode-upgraded `project.pbxproj`
+  were committed on 2026-11-12 as "native: polish, calendar, videos on sets, History → day" (before perf work, so perf
+  changes get their own commit and are easy to compare / revert). **Nothing is pushed.** Pushing only publishes
+  the folder on GitHub Pages; it doesn't change the web app. Commit style: `native: <what>` + bullets.
 - `GoogleService-Info.plist` is in `Training/` (Lukas registered the iOS app in Firebase on 2026-11-11), so sign-in works.
-  Commit it (not a secret, like the web config in app.js). Whether he has signed in with his real account on the
-  β app is unknown: ask before testing anything that would touch it.
+  Whether he has signed in with his real account on the β app is unknown: ask before testing anything that would touch it.
+- Lukas tests on his iPhone and reports by feel (he sent a screen recording for the kg ↔ Reps bug). He confirmed
+  videos work on the phone (2026-11-12); History → day not confirmed yet.
+
+Feature session (2026-11-12, all verified in the Simulator, light + dark; details under "Done" below):
+- **Calendar** from the month name on Today; **videos on sets** (Photos links, `LoggedSet.v`); **History → day** opens
+  that day's exercise screen on top; past days show their date on the exercise screen; video player plays sound on silent.
+- **Number pad kg ↔ Reps:** one animation rule (`switching ? Motion.soft : .easeOut(0.15)` keyed on field + set +
+  value); two rules made a switch that changed the number snap in ~4 frames. "Next set ›" no longer truncates.
+- History computes PRs once per list (a per-card `prSets` slipped in with History → day; fixed).
+
+Polish session (2026-11-12, earlier; all verified in the Simulator, light + dark, frame by frame where it moves):
+- **Rest stopwatch** no longer covers content: `RestRoom` (in `UI/Common/Floating.swift`) adds bottom room to each tab's
+  list while it shows. It has to sit on the List inside the NavigationStack (on the NavigationStack it does nothing).
+  The pill got a solid-ish card backing like the toast.
+- Plans list: "Active" sits next to the name (`Row(tag:)`). Exercise database: filter chips are a `safeAreaBar` under the
+  search field, edge to edge. Exercises tab says "Last logged today / yesterday". Settings no longer says "prototype".
+  Removed the unused `ComingSoon` view.
+- **Workout summary:** tapping an exercise opens its History *on top* of the summary (a sheet from `SummaryView`);
+  closing it returns to the summary. (It used to close the summary and open the exercise screen.)
+- **Number pad:** (1) slides fully off (transition offset = its height + safe bottom + 24; `.move(edge:)` left its top row
+  peeking out). (2) **Swipe down to close** (drag on the pad, follows the finger, > 70 pt or a flick closes, else springs back;
+  a swipe starting on a key doesn't type it: `dragged` flag). (3) Keeps showing its last contents while it slides away
+  (`lastShown`): it used to empty instantly on close, leaving only a pressed Done button to fall on its own.
+- **Press animations are scoped** (`PressStyle`, `CardPressStyle`, `KeyStyle` use `.animation(_:body:)`): the old
+  `.animation(value: isPressed)` also animated the button's *position* when a tap moved it away, on the press spring.
+- **Ticking a set with an empty field:** the field flashes red (stroke + light fill) for 0.55 s and fades back
+  (`Store.bad` cleared after a token-checked delay; `SetRow` animates it). A failed tick no longer moves the pad to the next set.
+- Open UI questions Lukas was asked but didn't answer (don't redo unasked): red trash icon on every Today row vs swipe to
+  delete; rest stopwatch as a floating pill vs iOS's `tabViewBottomAccessory` (the Music-style strip above the tab bar).
+- Known small quirks, not fixed: the Exercises tab's title starts small (inline) and only turns large after pulling down
+  (searchable drawer + iOS 26; `.navigationBarTitleDisplayMode(.large)` / `defaultScrollAnchor` didn't help). On the
+  exercise screen, when the list scrolls up for the number pad, the big exercise name slides under the ✓/timer buttons.
 
 Done (steps 0–4 of NATIVE-REBUILD §8, plus extras Lukas asked for):
 - **Today:** week strip (sliding capsule), swipe days, plan-driven days and labels. **A day's workouts are foldable groups**
@@ -34,14 +69,63 @@ Done (steps 0–4 of NATIVE-REBUILD §8, plus extras Lukas asked for):
 - **Settings:** name, account, units, appearance, week start, default sets, import/export backup, delete account.
 - **Friends** (2026-11-12): Friends tab, friend code, requests, a friend's profile (stats, workouts, an exercise's graph),
   your own profile, sharing switch, remove friend, sending workouts/plans (inbox, add/decline, unsend, history). Details below.
-- Not done: shared exercise database (browse shared entries, "Share to the database" on your own), calendar view outside
-  Move, embedded YouTube player, Google sign-in (only if asked), `#add-CODE` invite links opening the β app (they open
+- **Calendar** (2026-11-12): tap the month name on Today (blue ⌄ next to it) → a sheet of months
+  (first trained month or a year back → a year ahead; dot = trained, ring = planned, selected day blue, today red, Today
+  button); tap a day to go there. Jumps over 14 days land at once instead of scrolling through every day (also Today).
+  `UI/Today/CalendarSheet.swift`: `MonthGrid` + `CalendarDay` are shared with MoveSheet. A lazy list needs
+  `scrollPosition(id:)` for its start month (`scrollTo` on appear did nothing); `@Environment` read outside `body` crashes.
+- **Videos on sets** (2026-11-12): "Link video" next to "Add a note" → pick done set(s) → Photos picker
+  (videos) → linked. Stored as Photos cloud identifiers in `LoggedSet.v` (synced; web app keeps it, doesn't show it).
+  Blue icon under a set's number plays; History shows thumbnails; player can unlink. Code: `Model/Videos.swift`
+  (`linkVideos`/`unlinkVideo`, `VideoLibrary`: ids ↔ PHAsset, thumbnails, player items), `UI/Log/VideoViews.swift`,
+  `VideoTests`. Test videos in the Simulator: record its screen with `simctl io recordVideo`, then `simctl addmedia`.
+  Sound plays on silent (`VideoLibrary.movieSound`, the player sets `.playback` while open; not checkable in the Simulator).
+  Not verified: a real iCloud Photos library / switching phones (the Simulator has no iCloud Photos).
+- **History → day** (2026-11-12): tapping a day card in History opens that day's exercise screen as a
+  sheet on top (`HistoryList.openLog`, `Store.logStart`); closing returns to History. Past days show their date above the
+  exercise name. Exercise screens can stack, so `Store.logOpen` is now a count (`logDepth`).
+- Not done: shared exercise database (browse shared entries, "Share to the database" on your own), embedded YouTube player, Google sign-in (only if asked), `#add-CODE` invite links opening the β app (they open
   the web app; the β app would need associated domains).
 
-## Next session: polish pass (NATIVE-REBUILD §8 step 7)
-All six building steps are done. Ask Lukas how Friends feels on his phone (he hasn't seen it yet: it needs ▶ in Xcode),
-then go through what he reports. After the polish pass he decides: replace the Capacitor app for himself, and/or TestFlight
-($99/year) so his girlfriend and friends get the β app. Smaller leftovers: shared exercise database, calendar view.
+## Next session: performance and optimization (Lukas, 2026-11-12)
+Lukas is starting a session focused on performance. Nothing specific was reported as slow yet (he did say v0.26's web
+perf work mattered to him). **Start by asking what feels slow on his phone** (opening, swiping days, ticking sets,
+opening an exercise, History/charts, sync) and how much training he has in the β app; then measure before changing.
+Keep his rules: no visible behaviour change without asking, every movement stays on the `Motion` springs, haptics stay.
+
+How to measure (nothing native exists yet; build it first):
+- **A big data set.** The sample training is tiny. Make a debug-only fixture (e.g. a launch argument like
+  `-perfData` → 2 years, ~10,000 sets, a running plan, friends' data optional) so numbers mean something; the web app's
+  `../dev/perf.py` used 2 years / ~10,000 sets with the CPU slowed 4x. Never load it into a signed-in account (it syncs).
+- **Instruments from the command line:** `xcrun xctrace record --template 'SwiftUI' --device <UDID> --launch -- <app>`
+  (or Time Profiler / Hangs / Animation Hitches), then open the `.trace`. Add `os_signpost` intervals around suspects.
+- **Frame by frame** for hitches you can see: `simctl io recordVideo` + `dev/frames.swift` (30 fps); a strip-cropping
+  helper that stacks one band of each frame (e.g. the number pad header) made the kg ↔ Reps bug obvious: the capsule's
+  frame count shows a snap vs a spring. The Simulator runs on the Mac's CPU: confirm wins on Lukas's phone.
+
+Suspects found while reading the code (unmeasured; check each before touching it):
+1. **`Store.data.didSet` does `data.sets != oldValue.sets`**: a full array compare of every set on *every* data change
+   (typing a note, moving a workout, any sync). Then `idx = nil` rebuilds the whole `SetIndex` after each tick.
+   Ideas: compare counts/identity cheaply or mark set changes explicitly; update the index incrementally on tick/untick.
+2. **Every change re-encodes all of `AppData` to JSON** (`scheduleSave`, 300 ms debounce, background) and writes one
+   `training.json`: with 10k sets that's big. The web app splits sets per month (`tt.v1s.YYYY-MM`); something similar
+   (or only re-encoding changed months) would help. Keep the format readable for import/export and old files loadable.
+3. **One `@Observable var data`**: any change invalidates every view that reads `store.data` (all tabs, all day pages).
+   Fine-grained observation (separate stored properties, or per-view derived models) could cut redraws on tick.
+4. **`TodayView` `.onChange(of: store.data)`** compares the whole `AppData` (Equatable, all sets) on each update and
+   then runs `purgeStalePlanDays()`, which rebuilds the plan schedule (`schedCache` is cleared on every data change).
+   `Schedule` has no fingerprint cache like the web app's `schedSigNow`; adding one is likely a big win.
+5. **Today's day pager** is a `LazyHStack` over `-800...400` pages; each `DayPage` reads the store. Check what a swipe
+   redraws (Self._printChanges() in a debug build).
+6. Smaller: `CalendarSheet.months` scans `index.byDate.keys.min()` per body; `VideoThumb` looks up assets on appear
+   (cached after); `HistoryList` is a `LazyVStack` inside a `ScrollView` with a chart above it (check scrolling a long
+   history); sync push uses `HashCache` already (don't redo).
+Measure → change one thing → re-measure → run the 63 tests (+ add tests for any new caching: stale caches are the risk).
+
+Other ideas if they come up later (don't push them): decide the β app's future (replace `../native/` for himself and/or
+TestFlight, $99/year); leftovers (shared exercise database, YouTube player, Google sign-in only if asked, invite links
+opening the β app); the web app's open list in `../CLAUDE.md` (coaching switch, muscle-group labels/filter, more
+tracking types).
 
 ## Friends (how it works, for whoever changes it)
 - `Model/Friends.swift` (Firebase-free, tested in `FriendsTests`): `FriendLink` and `Gift` parsed (and cut to size) from
@@ -114,6 +198,8 @@ account untouched); the stale-sync-state case above.
   tapping there and use a second simulator (e.g. iPhone 17 `E641F2E5-E089-4733-A07E-CFB29E612F7F`); shut it down after.
 - Tests: `xcodebuild test -project Training.xcodeproj -scheme Training -destination 'platform=iOS Simulator,name=iPhone 17'`.
   Run them on a simulator **other** than the one you're looking at (a test run can shut that one down).
+  If every run fails with "failed to launch … No such process" (no crash report), the default build folder is stale:
+  add `-derivedDataPath <scratch folder>` for a fresh build (2026-11-12).
   59 tests (thousands of checks): friends (`FriendsTests`: gift import = app.js on a messy gift, codes, links, profiles), per-workout timers (`SessionTests`), day groups and Move (`DayGroupsTests`), sync (`SyncTests`: what's sent, merging, web-shaped documents, hash/friend code = app.js), logic, sanitizers (must equal app.js on a messy file), schedule (replays 1,500 steps recorded from
   app.js's own plan code; regenerate with `node ios-native/dev/schedule-fixtures.js`), workouts, exercises, sessions, reorder.
   For new ported logic, get expected values from app.js itself (node) rather than by hand: two hand-written expectations
@@ -133,7 +219,14 @@ account untouched); the stale-sync-state case above.
 - In a `LazyVGrid`, every cell across all `ForEach`es needs a distinct id (repeated 0, 1, 2… dropped cells silently).
 - Typing in the Simulator: the first keyboard use shows a "slide to type" tip that swallows the next tap. Fast injected
   text can lose characters in fields that reformat as you type (the friend-code field): type a character at a time.
-- **Quick injected taps don't flip a SwiftUI Toggle**; use `tap` with `duration: 0.15`.
+- **Quick injected taps don't flip a SwiftUI Toggle**; use `tap` with `duration: 0.15`. Plain buttons and tabs are
+  also more reliable with `duration: 0.15`. Tap coordinates are device points (iPhone 17: 402 × 874), not screenshot pixels.
+- Right after booting a simulator, input isn't accepted for ~10 s ("input connection is still starting up"): wait, retry.
+- Opening the number pad scrolls the set list up: take a screenshot before tapping a tick, or you'll hit a pad key.
+- `xcrun simctl ui <UDID> appearance light|dark` switches the theme. A fresh install (`simctl uninstall` then install)
+  gives the sample training, handy for tests.
+- A view that's being removed with a transition is still redrawn from the store: if its body reads state that just
+  became nil it goes blank instead of sliding away (keep a snapshot, as the number pad does).
 - `.sheet` is the "slides up from the bottom" Lukas asked for (Apple's own springs and pull-down). Editors use
   `.interactiveDismissDisabled()` and close with ✕ / ✓.
 
@@ -143,9 +236,10 @@ account untouched); the stale-sync-state case above.
   `Groups.swift` workouts on a day, Move · `Sessions.swift` each workout's timer/Finish ·
   `Plans.swift` plan schedule + moving plan days · `Workouts.swift` save/delete/start/end · `Library.swift` exercise
   database, chart series, PRs, summary · `Sanitize.swift` `Clean.*` · `SampleData.swift` · `SyncCore.swift` + `Cloud.swift`
-  accounts and sync · `Friends.swift` + `FriendsCloud.swift` friends, profiles, gifts.
-- `UI/RootView` tabs + floating rest/toasts · `Today/` (TodayView, WeekStrip, DayExerciseList + WorkoutGroupView, MoveSheet) ·
-  `Log/` (LogView sheet, SetRow, NumberPad) · `Workouts/` · `Exercises/` · `Summary/` · `Friends/` · `Common/` (Finish, Add, Note,
+  accounts and sync · `Friends.swift` + `FriendsCloud.swift` friends, profiles, gifts · `Videos.swift` videos on sets
+  (Photos ids, thumbnails, playback, movie sound).
+- `UI/RootView` tabs + floating rest/toasts · `Today/` (TodayView, WeekStrip, DayExerciseList + WorkoutGroupView, MoveSheet, CalendarSheet = MonthGrid + CalendarDay) ·
+  `Log/` (LogView sheet, SetRow, NumberPad, VideoViews = Link video / thumbnails / player) · `Workouts/` · `Exercises/` · `Summary/` · `Friends/` · `Common/` (Finish, Add, Note,
   Settings sheets; `AccountViews` sign in / sign out / delete account; RestPill, Toast) · `Theme.swift` colours, springs (`Motion`), haptics.
 
 ## Lukas's preferences (learned so far)

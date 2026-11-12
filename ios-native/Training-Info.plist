@@ -4,6 +4,8 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>To link videos from your Photos to your sets and play them back in your history.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

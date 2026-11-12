@@ -35,6 +35,7 @@ struct FriendsView: View {
             }
             .listStyle(.insetGrouped)
             .listSectionSpacing(14)
+            .modifier(RestRoom())
             .navigationTitle("Friends")
             .toolbar {
                 if cloud.user != nil {
