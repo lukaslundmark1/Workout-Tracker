@@ -149,6 +149,7 @@ struct LibraryView: View {
                 }
             }
         }
+        .pageColors()
         .sheet(isPresented: $creating) {
             ExerciseForm(exId: nil, preset: .init(name: query.trimmingCharacters(in: .whitespaces), muscle: muscle, equip: equip)) { id in
                 if case .day(let k) = mode { store.addExercise(id, to: k) }

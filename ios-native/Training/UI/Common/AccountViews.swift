@@ -139,6 +139,7 @@ struct SignOutSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .sheetColors()
         .interactiveDismissDisabled(busy)
         .onAppear { remove = cloud.online }
     }

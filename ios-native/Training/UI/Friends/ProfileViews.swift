@@ -58,6 +58,7 @@ struct ProfileView: View {
                 }
             }
         }
+        .pageColors()
         .task(id: link?.theyShare(f.me)) { if link?.theyShare(f.me) == true { await load(force: false) } }
         .sheet(isPresented: $sending) { if let l = link { SendPickSheet(linkId: l.id) } }
     }

@@ -217,6 +217,17 @@ Lukas asked to see what the app would be like fully rebuilt for iOS (`docs/NATIV
 - **Calendar months are plain rows** instead of a lazy grid in every month. Still left: opening the calendar measures every month above the one it opens on (~170 ms with 2 years); fixing it means rebuilding how the month list scrolls, not done.
 - Not changed: opening a sheet costs ~100–200 ms of the system's own work on the first open; the sync push still checks every record's hash (~4 ms per change with 10,000 sets) because skipping it safely is risky.
 
+## Fully native app: dark mode like the web app (2026-11-12, Lukas)
+- Lukas: dark mode should look like the web app's; some menus were too light. Cause: iOS draws sheets one shade lighter
+  in dark mode, and half-height sheets as grey see-through glass, while in the web app the exercise screen, History,
+  summary, calendar, plans, editors and profiles are black pages with #1c1c1e cards.
+- Sheets that are pages in the web app now use the page colours (`.pageColors()`, base interface level); pop-ups keep
+  the web's sheet colours (#1c1c1e / #2c2c2e) and are solid at half height (`.sheetColors()`). Pop-ups that were a step
+  lighter (note, Finish, set count) now match the web. Add exercise / workout uses the pop-up shade: a black half sheet
+  had no visible edge over the dimmed page. Light mode is unchanged. Apple's menus and dialogs stay as they are.
+- Also decided: keep the red trash icon on Today rows; keep the rest stopwatch as a floating pill for now (the
+  strip above the tab bar is an option for later).
+
 ## Cloud sync design (v0.11)
 - Local-first. Firestore paths: `users/{uid}/{exercises,workouts,days,sets,plans,meta}/{id}`. `meta/settings` holds the settings and the active plan. Each doc has a `u` (updated) time; deletes are tombstones.
 - Push: diff each record's hash against what was last synced, send in batches, debounced 600 ms.

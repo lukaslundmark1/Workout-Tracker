@@ -75,6 +75,7 @@ struct WorkoutEditor: View {
                 }
             }
         }
+        .pageColors()
         .interactiveDismissDisabled()   // editors close with ✕ or ✓, not by pulling down
         .sheet(isPresented: $adding) {
             AddToWorkoutSheet(have: Set(draft.items.map(\.exId))) { exId, sets in
@@ -128,7 +129,7 @@ struct SetCountSheet: View {
                 Spacer(minLength: 0)
             }
             .padding(.top, 8)
-            .background(Color(uiColor: .secondarySystemBackground))
+            .background(Color.bg)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -138,6 +139,7 @@ struct SetCountSheet: View {
             }
         }
         .presentationDetents([.height(380)])
+        .sheetColors()
     }
 }
 
@@ -201,7 +203,7 @@ struct AddToWorkoutSheet: View {
                     Spacer()
                 }
                 .padding(.top, 20)
-                .background(Color(uiColor: .secondarySystemBackground))
+                .background(Color.bg)
                 .navigationTitle(store.exById(p.id)?.name ?? "Exercise")
                 .navigationBarTitleDisplayMode(.inline)
             }

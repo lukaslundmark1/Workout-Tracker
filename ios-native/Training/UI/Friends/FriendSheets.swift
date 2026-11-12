@@ -149,6 +149,7 @@ struct AcceptFriendSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .sheetColors()
     }
 }
 

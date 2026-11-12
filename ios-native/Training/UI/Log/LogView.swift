@@ -49,6 +49,7 @@ struct LogView: View {
                 ToolbarItem(placement: .topBarTrailing) { TimerButton(day: day, g: group, onFinish: { finishFor = GroupKey(k: day, g: group) }) }
             }
         }
+        .pageColors()
         .onAppear { store.logDepth += 1 }
         .onChange(of: pos) { old, new in
             if old != nil, new != nil, old != new { Haptics.select(); store.padClose() }

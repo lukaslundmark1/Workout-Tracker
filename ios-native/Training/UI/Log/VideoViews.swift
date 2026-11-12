@@ -115,6 +115,7 @@ struct LinkVideoSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .sheetColors()
         .presentationDragIndicator(.visible)
         .onAppear { if sets.count == 1 { chosen = [sets[0].id] } }   // just one set: it's that one
     }

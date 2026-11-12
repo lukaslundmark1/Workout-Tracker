@@ -47,7 +47,7 @@ struct FinishSheet: View {
                             Toggle("Log the \(Fmt.plural(c.ok.count, "unticked set")) as shown", isOn: Binding(get: { logIt }, set: { Haptics.select(); logRest = $0 }))
                                 .tint(.green)
                                 .padding(.horizontal, 16).frame(minHeight: 52)
-                                .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                                .background(Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                             footnote("Uses the weight and reps shown in each row." + (c.unticked.count > c.ok.count ? " \(Fmt.plural(c.unticked.count - c.ok.count, "set")) without numbers will be skipped." : ""))
                         }
                         if nothing {
@@ -72,7 +72,7 @@ struct FinishSheet: View {
                     }
                     .font(.rounded(20))
                     .frame(maxWidth: .infinity)
-                    .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .background(Color.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .onChange(of: h) { if ready { Haptics.select() } }
                     .onChange(of: m) { if ready { Haptics.select() } }
 
@@ -85,7 +85,7 @@ struct FinishSheet: View {
                 }
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 30)
             }
-            .background(Color(uiColor: .secondarySystemBackground))
+            .background(Color.bg)
             .navigationTitle(c.editing ? "Duration" : "Finish \(store.groups(day).first { $0.id == g }.map { $0.id == otherGroup ? "workout" : $0.name } ?? "workout")")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -230,6 +230,7 @@ struct AddSheet: View {
                 }
             }
         }
+        .sheetColors()   // half height: the pop-up shade keeps its edge visible over the dimmed page
         .presentationDetents([.medium, .large])
         .sheet(isPresented: $browsing) {
             LibraryView(mode: .day(day), query: query) { id in dismiss(); onAdded(id) }
@@ -256,14 +257,14 @@ struct NoteSheet: View {
                     .lineLimit(3...6)
                     .focused($focused)
                     .padding(14)
-                    .background(Color(uiColor: .tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(Color.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .onChange(of: text) { if text.count > 200 { text = String(text.prefix(200)) } }
                 Text("Only you can see this. It isn't sent with workouts or plans.")
                     .font(.footnote).foregroundStyle(Color.label2).padding(.horizontal, 6)
                 Spacer()
             }
             .padding(16)
-            .background(Color(uiColor: .secondarySystemBackground))
+            .background(Color.bg)
             .navigationTitle(store.exById(exId)?.name ?? "Note")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -277,6 +278,7 @@ struct NoteSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .sheetColors()
         .onAppear { text = store.exById(exId)?.note ?? ""; focused = true }
     }
 }

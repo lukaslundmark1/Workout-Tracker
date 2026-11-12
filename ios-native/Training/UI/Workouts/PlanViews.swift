@@ -22,6 +22,7 @@ struct PlanView: View {
         NavigationStack {
             if let p = store.planById(planId) { content(p) } else { Color.clear.onAppear { dismiss() } }
         }
+        .pageColors()
         .sheet(item: $editing) { d in PlanEditor(draft: d) { id in if id == nil { dismiss() } } }
         .sheet(isPresented: $starting) { PlanStartSheet(planId: planId) }
         .sheet(isPresented: $sending) { if let p = store.planById(planId) { SendToSheet(item: .plan(p)) } }
@@ -187,6 +188,7 @@ struct PlanEditor: View {
                 }
             }
         }
+        .pageColors()
         .interactiveDismissDisabled()
         .sheet(item: $dayPick) { pick in
             PlanDayPicker(index: pick.index, current: pick.isNew ? nil : draft.days[pick.index]) { v in
@@ -247,6 +249,7 @@ struct PlanDayPicker: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .sheetColors()
     }
 
     private func choice<L: View>(_ workoutId: String?, @ViewBuilder label: () -> L) -> some View {

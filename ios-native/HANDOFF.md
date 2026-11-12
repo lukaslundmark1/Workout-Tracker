@@ -1,4 +1,4 @@
-# Handoff: Training β (native SwiftUI app), next up: a few small visual changes
+# Handoff: Training β (native SwiftUI app), next up: more small visual changes
 
 Updated 2026-11-12 (night) after a performance session (below, committed as `a745eb9`). **Next session (Lukas): a few
 visual changes, minor things.** He'll say what; small UI changes are "just do them" (see his preferences at the end), then
@@ -9,6 +9,23 @@ accounts + sync and the day overhaul. **Read in this order:** `../CLAUDE.md` (ho
 `../docs/DECISIONS.md` (every choice and why), `README.md` here. The web app (`../app.js`) is the reference: when docs and
 code disagree, the code wins. `../dev/README.md` → performance rules and `../docs/DECISIONS.md` → "Performance (v0.26)"
 describe how the *web* app was made fast; the same ideas (index, caches, no work during gestures) apply here.
+
+## Dark mode like the web app (2026-11-12, Lukas: "make the dark mode more similar to the web app; some menus are too light")
+Verified in the Simulator (dark + light, and frame by frame that sheets don't flash grey when they slide up). Not felt on his phone yet.
+- iOS draws every sheet one shade lighter in dark mode ("elevated": #1c1c1e background, #2c2c2e cards), and at half
+  height iOS 26 draws it as see-through grey glass. The web app has two looks: **full pages** (black, #1c1c1e cards) and
+  **pop-ups** (`--sheet-bg` #1c1c1e, `--sheet-card` #2c2c2e).
+- `.pageColors()` (in `UI/Theme.swift`) is for sheets that are full pages in the web app: it sets the sheet's
+  `userInterfaceLevel` to `.base` (a tiny `BaseLevel` view controller, via `traitOverrides`) and gives it a solid
+  background. On: exercise screen (LogView), ExerciseDetail (History / exercise page), Summary, Calendar, Library,
+  PlanView, PlanEditor, WorkoutEditor, ProfileView. Sheets opened from these are elevated again (pop-up colours).
+- `.sheetColors()` is for pop-ups at half height (solid `Color.bg` instead of glass): Add exercise / workout (a page on
+  the web, but a black half sheet lost its edge over the dimmed page), plan day picker, sign out, link video, accept friend.
+- Pop-ups that used `secondarySystemBackground` / `tertiarySystemBackground` (#2c2c2e / #3a3a3c in a sheet: too light)
+  now use `Color.bg` / `Color.card`: Note, Finish, set count sheets in the workout editor. Light mode is unchanged.
+- A new sheet: pick `.pageColors()` if the web shows it as a page, else leave it (full height) or `.sheetColors()` (partial height).
+  Don't use `secondarySystemBackground`/`tertiarySystemBackground` for sheet backgrounds or cards; use `Color.bg`/`Color.card`.
+- Menus (`Menu`, confirmation dialogs) are Apple's own glass and weren't changed.
 
 ## Where things stand
 - Built and tested in the Simulator (iPhone 17, iOS 27.2, light and dark); 69 unit tests pass. Lukas has the project
@@ -45,8 +62,8 @@ Polish session (2026-11-12, earlier; all verified in the Simulator, light + dark
   `.animation(value: isPressed)` also animated the button's *position* when a tap moved it away, on the press spring.
 - **Ticking a set with an empty field:** the field flashes red (stroke + light fill) for 0.55 s and fades back
   (`Store.bad` cleared after a token-checked delay; `SetRow` animates it). A failed tick no longer moves the pad to the next set.
-- Open UI questions Lukas was asked but didn't answer (don't redo unasked): red trash icon on every Today row vs swipe to
-  delete; rest stopwatch as a floating pill vs iOS's `tabViewBottomAccessory` (the Music-style strip above the tab bar).
+- Answered 2026-11-12: **keep the red trash icon** on every Today row (no swipe to delete). **Keep the rest stopwatch as a
+  floating pill for now**; iOS's `tabViewBottomAccessory` (the Music-style strip above the tab bar) stays an option he may want later.
 - Known small quirks, not fixed: the Exercises tab's title starts small (inline) and only turns large after pulling down
   (searchable drawer + iOS 26; `.navigationBarTitleDisplayMode(.large)` / `defaultScrollAnchor` didn't help). On the
   exercise screen, when the list scrolls up for the number pad, the big exercise name slides under the ✓/timer buttons.

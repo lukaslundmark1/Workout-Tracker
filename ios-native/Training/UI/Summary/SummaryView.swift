@@ -101,6 +101,7 @@ struct SummaryView: View {
                 }
             }
         }
+        .pageColors()
         .onAppear {
             if Motion.reduced { shown = true; return }
             withAnimation(.spring(response: 0.5, dampingFraction: 0.55).delay(0.15)) { shown = true }

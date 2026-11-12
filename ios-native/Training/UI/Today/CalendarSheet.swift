@@ -134,6 +134,7 @@ struct CalendarSheet: View {
             .navigationTitle("Calendar")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .pageColors()
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }

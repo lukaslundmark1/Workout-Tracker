@@ -49,6 +49,7 @@ struct ExerciseDetail: View {
                 Color.clear.onAppear { dismiss() }
             }
         }
+        .pageColors()
         .sheet(isPresented: $editing) { ExerciseForm(exId: exId, deleted: { dismiss() }) }
     }
 
