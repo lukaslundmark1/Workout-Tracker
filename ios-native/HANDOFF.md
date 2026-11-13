@@ -10,22 +10,17 @@ accounts + sync and the day overhaul. **Read in this order:** `../CLAUDE.md` (ho
 code disagree, the code wins. `../dev/README.md` → performance rules and `../docs/DECISIONS.md` → "Performance (v0.26)"
 describe how the *web* app was made fast; the same ideas (index, caches, no work during gestures) apply here.
 
-## Dark mode like the web app (2026-11-12, Lukas: "make the dark mode more similar to the web app; some menus are too light")
-Verified in the Simulator (dark + light, and frame by frame that sheets don't flash grey when they slide up). Not felt on his phone yet.
-- iOS draws every sheet one shade lighter in dark mode ("elevated": #1c1c1e background, #2c2c2e cards), and at half
-  height iOS 26 draws it as see-through grey glass. The web app has two looks: **full pages** (black, #1c1c1e cards) and
-  **pop-ups** (`--sheet-bg` #1c1c1e, `--sheet-card` #2c2c2e).
-- `.pageColors()` (in `UI/Theme.swift`) is for sheets that are full pages in the web app: it sets the sheet's
-  `userInterfaceLevel` to `.base` (a tiny `BaseLevel` view controller, via `traitOverrides`) and gives it a solid
-  background. On: exercise screen (LogView), ExerciseDetail (History / exercise page), Summary, Calendar, Library,
-  PlanView, PlanEditor, WorkoutEditor, ProfileView. Sheets opened from these are elevated again (pop-up colours).
-- `.sheetColors()` is for pop-ups at half height (solid `Color.bg` instead of glass): Add exercise / workout (a page on
-  the web, but a black half sheet lost its edge over the dimmed page), plan day picker, sign out, link video, accept friend.
-- Pop-ups that used `secondarySystemBackground` / `tertiarySystemBackground` (#2c2c2e / #3a3a3c in a sheet: too light)
-  now use `Color.bg` / `Color.card`: Note, Finish, set count sheets in the workout editor. Light mode is unchanged.
-- A new sheet: pick `.pageColors()` if the web shows it as a page, else leave it (full height) or `.sheetColors()` (partial height).
-  Don't use `secondarySystemBackground`/`tertiarySystemBackground` for sheet backgrounds or cards; use `Color.bg`/`Color.card`.
-- Menus (`Menu`, confirmation dialogs) are Apple's own glass and weren't changed.
+## Dark mode: Apple's sheet colours (2026-11-12, changed back 2026-11-13)
+- Tried on 2026-11-12: sheets that are full pages in the web app drawn black with #1c1c1e cards (a `BaseLevel` trait
+  override). **Undone on 2026-11-13 at Lukas's request ("I want consistency").** When a sheet opens on top of another,
+  iOS darkens the edge of the sheet behind to about #141415 whatever its colour (measured). On Apple's grey sheets
+  (#1c1c1e) that's invisible (Calendar, Mail; Lukas checked with a recording); on black it showed as a lighter strip.
+- Now every sheet uses iOS's own sheet colours in dark mode: #1c1c1e background, #2c2c2e cards (`Color.bg` / `Color.card`
+  resolve that way inside sheets). The main tabs aren't sheets and stay black, like Apple's apps.
+- `.pageColors()` and `.sheetColors()` (UI/Theme.swift) both just give the sheet a solid background (iOS 26 otherwise
+  draws partial-height sheets as see-through glass). Keep using them on new sheets.
+- Don't use `secondarySystemBackground` / `tertiarySystemBackground` for sheet backgrounds or cards (#2c2c2e / #3a3a3c
+  in a sheet); use `Color.bg` / `Color.card`.
 - **Finish / Duration pop-up (2026-11-12, Lukas):** a short pop-up sized to its content. Duration is one row like an iOS
   Settings row: "Started 20:36" on the left, the value in a capsule on the right ("1 h 05 min"); tapping it shows the
   hour/minute wheels inside the same card (open at first when changing a finished workout's Duration, closed when

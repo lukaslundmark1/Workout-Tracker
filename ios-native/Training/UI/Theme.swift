@@ -91,46 +91,15 @@ extension View {
     }
 }
 
-// MARK: Page colours in sheets
-// The web app shows the exercise screen, History, the summary, the calendar, Add exercise, the database, plans,
-// workout/plan editors and profiles as full pages: black background, #1c1c1e cards in dark mode. Here they slide up
-// as sheets, and iOS draws every sheet one shade lighter (#1c1c1e / #2c2c2e, "elevated"). `.pageColors()` puts the
-// sheet back on the base level so it matches the web page. Small pop-ups (note, Finish, Move, sign in, send…) are
-// sheets in the web app too and keep iOS's lighter sheet colours, like the web's --sheet-bg / --sheet-card.
-
-/// Sets the containing sheet's interface level to `.base` as soon as it's in the view controller tree.
-private struct BaseLevel: UIViewControllerRepresentable {
-    final class Controller: UIViewController {
-        override func willMove(toParent parent: UIViewController?) {
-            super.willMove(toParent: parent)
-            apply(from: parent)
-        }
-        override func viewWillAppear(_ animated: Bool) {
-            super.viewWillAppear(animated)
-            apply(from: parent)
-        }
-        private func apply(from start: UIViewController?) {
-            var vc = start
-            while let p = vc?.parent { vc = p }
-            // reading an override that isn't set asserts, so ask first
-            guard let top = vc, !top.traitOverrides.contains(UITraitUserInterfaceLevel.self) else { return }
-            top.traitOverrides.userInterfaceLevel = .base
-        }
-    }
-    func makeUIViewController(context: Context) -> Controller {
-        let c = Controller(); c.view.isUserInteractionEnabled = false; c.view.backgroundColor = .clear; return c
-    }
-    func updateUIViewController(_ uiViewController: Controller, context: Context) {}
-}
+// MARK: Sheet colours
+// Sheets use iOS's own sheet colours in dark mode (#1c1c1e background, #2c2c2e cards), like Apple's apps. A black
+// "page" look was tried (2026-11-12) but iOS darkens the edge of a sheet when another opens on top of it (#141415):
+// on grey that matches (Calendar, Mail), on black it showed as a lighter strip. Lukas chose consistency (2026-11-13).
 
 extension View {
-    /// A sheet that is a full page in the web app: black background and #1c1c1e cards in dark mode.
-    func pageColors() -> some View {
-        background { BaseLevel().frame(width: 0, height: 0).accessibilityHidden(true) }
-            .presentationBackground(Color.bg)
-    }
-    /// A small pop-up sheet (a sheet in the web app too): solid #1c1c1e in dark mode, like the web's --sheet-bg.
-    /// Without it, iOS 26 draws half-height sheets as see-through glass, which looks grey and lighter than the web.
+    /// A sheet that is a full page in the web app (the exercise screen, History, plans, editors…): solid sheet colours.
+    func pageColors() -> some View { presentationBackground(Color.bg) }
+    /// A small pop-up sheet: solid #1c1c1e in dark mode instead of iOS 26's see-through glass at partial height.
     func sheetColors() -> some View { presentationBackground(Color.bg) }
 }
 

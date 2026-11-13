@@ -217,7 +217,7 @@ Lukas asked to see what the app would be like fully rebuilt for iOS (`docs/NATIV
 - **Calendar months are plain rows** instead of a lazy grid in every month. Still left: opening the calendar measures every month above the one it opens on (~170 ms with 2 years); fixing it means rebuilding how the month list scrolls, not done.
 - Not changed: opening a sheet costs ~100–200 ms of the system's own work on the first open; the sync push still checks every record's hash (~4 ms per change with 10,000 sets) because skipping it safely is risky.
 
-## Fully native app: dark mode like the web app (2026-11-12, Lukas)
+## Fully native app: dark mode like the web app (2026-11-12, Lukas; sheet part undone 2026-11-13)
 - Lukas: dark mode should look like the web app's; some menus were too light. Cause: iOS draws sheets one shade lighter
   in dark mode, and half-height sheets as grey see-through glass, while in the web app the exercise screen, History,
   summary, calendar, plans, editors and profiles are black pages with #1c1c1e cards.
@@ -233,6 +233,10 @@ Lukas asked to see what the app would be like fully rebuilt for iOS (`docs/NATIV
   short pop-up: only as tall as its content, wheels shorter (150 pt) and without the lighter box behind them.
   It still turned the exercise screen grey (iOS lightens a sheet when another sheet opens over it), so on the exercise screen
   the pop-up is drawn by the page itself and darkens the page instead, like the web app.
+- 2026-11-13: the black sheets were undone. iOS darkens the edge of a sheet behind another sheet to about #141415, which
+  matches Apple's grey sheets (Lukas checked Calendar: "both sheets are the same exact colour") but showed as a lighter
+  strip on black (History / Add exercise over the exercise screen). Lukas: "I want consistency", so all sheets use iOS's
+  own sheet colours (#1c1c1e / #2c2c2e); the main tabs stay black. The page-drawn pop-ups and the new Duration row stay.
   Note and Link video work the same way now. Then the Duration part was redone (Lukas: wheels too low, "clunky"): one
   row "Started 20:36 · [1 h 05 min]" like an iOS Settings row; tapping the value opens the wheels inside the same card.
 
